@@ -1,0 +1,88 @@
+# Виртуальные окружения
+venv/
+ENV/
+.env/
+*.env
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Логи
+*.log
+logs/
+logging.ini
+
+# Компиляция и билды
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Тесты и покрытия
+.coverage
+coverage/
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Jupyter и IPython
+.ipynb_checkpoints/
+*.ipynb
+
+# Базы данных и дампы
+*.sqlite3
+*.db
+*.sql
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
+
+# Redis и Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Node.js (если есть фронтенд в одном репо)
+frontend/node_modules/
+frontend/dist/
+
+# Секреты и ключи
+*.pem
+*.key
+*.crt
+*.cert
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Кэш ML/AI
+*.h5
+*.pkl
+*.joblib
+*.pt
+*.pth
+
+# Миграции Alembic (если не нужны в репо)
+migrations/versions/
+
+# Дополнительно
+.cache/
+*.tgz
+*.tar.gz
+*.zip
+*.rar
