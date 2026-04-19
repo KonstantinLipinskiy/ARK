@@ -13,9 +13,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5
 
 # 🔹 Параметры риска (глобальные)
 RISK_CONFIG = {
-    "max_risk_per_trade": 0.01,   # 1% от депозита на сделку
-    "max_open_trades": 5,         # ограничение по количеству сделок
-    "max_daily_loss": 0.05        # 5% от депозита в день
+	"max_risk_per_trade": 0.01,   # 1% от депозита на сделку
+	"max_open_trades": 5,         # ограничение по количеству сделок
+	"max_daily_loss": 0.05        # 5% от депозита в день
 }
 
 # 🔹 Конфигурация стратегий для валютных пар
