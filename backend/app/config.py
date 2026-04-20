@@ -80,3 +80,13 @@ STRATEGY_CONFIG = {
 		"trailing_mode": "step"
 	}
 }
+
+# 🔹 Конфигурация биржи (ccxt)
+EXCHANGE_CONFIG = {
+	"name": "binance",          # название биржи в ccxt
+	"api_key": API_KEY,         # подтягиваем из .env
+	"api_secret": API_SECRET,   # подтягиваем из .env
+}
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
