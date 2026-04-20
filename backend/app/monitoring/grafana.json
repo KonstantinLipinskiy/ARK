@@ -1,0 +1,36 @@
+{
+	"dashboard": {
+		"id": null,
+		"title": "ARK Bot Metrics",
+		"panels": [
+		{
+			"type": "graph",
+			"title": "Winrate (%)",
+			"targets": [
+				{ "expr": "bot_winrate" }
+			]
+		},
+		{
+			"type": "graph",
+			"title": "Total Profit",
+			"targets": [
+				{ "expr": "bot_total_profit" }
+			]
+		},
+		{
+			"type": "graph",
+			"title": "Max Drawdown",
+			"targets": [
+				{ "expr": "bot_max_drawdown" }
+			]
+		},
+		{
+			"type": "graph",
+			"title": "Trades Count",
+			"targets": [
+				{ "expr": "bot_trades_count" }
+			]
+		}
+		]
+	}
+}
