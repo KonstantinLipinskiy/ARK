@@ -12,7 +12,6 @@ __pycache__/
 # Логи
 *.log
 logs/
-logging.ini
 
 # Компиляция и билды
 *.so

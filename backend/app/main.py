@@ -26,3 +26,8 @@ async def root():
 
 # Запуск через uvicorn:
 # uvicorn app.main:app --reload
+
+from app.utils.logger import logger
+
+logger.info("ARK Bot API запущен")
+logger.debug("Отладка стратегии ETH/USDT")
