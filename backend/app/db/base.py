@@ -8,8 +8,8 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///./arkbot.db"
 
 # Создаём движок
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in SQLALCHEMY_DATABASE_URL else {}
+	SQLALCHEMY_DATABASE_URL,
+	connect_args={"check_same_thread": False} if "sqlite" in SQLALCHEMY_DATABASE_URL else {}
 )
 
 # Создаём фабрику сессий

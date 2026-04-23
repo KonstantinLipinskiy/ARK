@@ -12,7 +12,7 @@ class Trade(BaseModel):
 	status: str = Field(default="open", description="Статус сделки: open, closed, cancelled")
 
 	class Config:
-		schema_extra = {
+		json_schema_extra = {
 			"example": {
 					"symbol": "BTC/USDT",
 					"side": "buy",

@@ -11,3 +11,8 @@ def setup_logger(config_path: str = "logging.ini"):
 
 # Инициализация логгера при импорте
 logger = setup_logger()
+
+from app.utils.logger import logger
+
+logger.info("ARK Bot API запущен")
+logger.debug("Отладка стратегии ETH/USDT")

@@ -11,7 +11,7 @@ class Signal(BaseModel):
 	direction: str = Field(..., description="Направление: buy или sell")
 
 	class Config:
-		schema_extra = {
+		json_schema_extra = {
 			"example": {
 					"symbol": "ETH/USDT",
 					"indicator": "RSI",

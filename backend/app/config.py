@@ -1,14 +1,11 @@
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные окружения из .env
 load_dotenv()
 
-# 🔹 API ключи (из .env)
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 
-# 🔹 Подключение к БД (PostgreSQL по умолчанию)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/arkbot")
 
 # 🔹 Параметры риска (глобальные)

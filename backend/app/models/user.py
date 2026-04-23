@@ -10,7 +10,7 @@ class User(BaseModel):
 	created_at: datetime = Field(default_factory=datetime.utcnow, description="Дата регистрации")
 
 	class Config:
-		schema_extra = {
+		json_schema_extra = {
 			"example": {
 					"username": "konstantin",
 					"email": "test@example.com",

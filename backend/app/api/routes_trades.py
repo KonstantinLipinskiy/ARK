@@ -1,22 +1,21 @@
-# app/api/routes_trades.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
-from app.models import Trade  # Pydantic модель
-from app.db.schemas import TradeORM  # SQLAlchemy модель
-from app.db.session import get_db
 from sqlalchemy.orm import Session
+from app.models import Trade
+from app.db.schemas import TradeORM
+from app.db.session import get_db
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 
 # 🔹 Получить все сделки
 @router.get("/", response_model=List[Trade])
-def get_trades(db: Session = get_db()):
+def get_trades(db: Session = Depends(get_db)):
 	trades = db.query(TradeORM).all()
 	return trades
 
 # 🔹 Получить сделку по ID
 @router.get("/{trade_id}", response_model=Trade)
-def get_trade(trade_id: int, db: Session = get_db()):
+def get_trade(trade_id: int, db: Session = Depends(get_db)):
 	trade = db.query(TradeORM).filter(TradeORM.id == trade_id).first()
 	if not trade:
 		raise HTTPException(status_code=404, detail="Trade not found")
@@ -24,7 +23,7 @@ def get_trade(trade_id: int, db: Session = get_db()):
 
 # 🔹 Добавить новую сделку
 @router.post("/", response_model=Trade)
-def create_trade(trade: Trade, db: Session = get_db()):
+def create_trade(trade: Trade, db: Session = Depends(get_db)):
 	new_trade = TradeORM(**trade.dict())
 	db.add(new_trade)
 	db.commit()
@@ -33,7 +32,7 @@ def create_trade(trade: Trade, db: Session = get_db()):
 
 # 🔹 Удалить сделку
 @router.delete("/{trade_id}")
-def delete_trade(trade_id: int, db: Session = get_db()):
+def delete_trade(trade_id: int, db: Session = Depends(get_db)):
 	trade = db.query(TradeORM).filter(TradeORM.id == trade_id).first()
 	if not trade:
 		raise HTTPException(status_code=404, detail="Trade not found")
