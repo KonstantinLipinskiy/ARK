@@ -1,17 +1,26 @@
-from logging.config import fileConfig
 import os
+import sys
+import os
+
+from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Импортируем Base и все ORM‑модели
 from app.db.base import Base
 from app.db import schemas
 
+
 # Загружаем конфиг Alembic
 config = context.config
 
-# Читаем DATABASE_URL из переменных окружения
+# Читаем DATABASE_URL из .env
+from dotenv import load_dotenv
+load_dotenv()
+
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./arkbot.db")
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 

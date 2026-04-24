@@ -4,9 +4,9 @@ from app.config import DATABASE_URL
 
 
 # URL подключения к БД (пока можно оставить SQLite для тестов)
-SQLALCHEMY_DATABASE_URL = "sqlite:///./arkbot.db"
+# SQLALCHEMY_DATABASE_URL = "sqlite:///./arkbot.db"
 # Для PostgreSQL будет так:
-# SQLALCHEMY_DATABASE_URL = DATABASE_URL
+SQLALCHEMY_DATABASE_URL = DATABASE_URL
 
 # Создаём движок
 engine = create_engine(

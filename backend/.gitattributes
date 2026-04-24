@@ -1,0 +1,19 @@
+# Все текстовые файлы будут храниться в LF
+* text=auto eol=lf
+
+# Явно фиксируем LF для Python‑файлов
+*.py text eol=lf
+
+# Конфиги тоже лучше хранить в LF
+*.ini text eol=lf
+*.cfg text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Скрипты и миграции Alembic
+*.mako text eol=lf
+
+# requirements и env‑файлы
+requirements.txt text eol=lf
+.env text eol=lf
