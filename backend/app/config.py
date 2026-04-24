@@ -6,7 +6,7 @@ load_dotenv()
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/arkbot")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # 🔹 Параметры риска (глобальные)
 RISK_CONFIG = {
