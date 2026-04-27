@@ -1,36 +1,51 @@
 import os
-import logging
+import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+from aiogram.filters import Command
 from dotenv import load_dotenv
 
-# Загружаем токен из .env
+# Импортируем наш общий логгер
+from app.utils.logger import logger
+
+# Загружаем токен и chat_id из .env
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Инициализация бота
 bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher(bot)
-
-# Логирование
-logging.basicConfig(level=logging.INFO)
+dp = Dispatcher()
 
 # 🔹 Команда /start
-@dp.message_handler(commands=["start"])
+@dp.message(Command("start"))
 async def start_command(message: types.Message):
+	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+		logger.warning(f"Попытка доступа от чужого chat_id: {message.chat.id}")
+		return
+	logger.info("Выполнена команда /start")
 	await message.answer("Привет! Я ARK Bot. Буду присылать уведомления о сделках и статистику.")
 
 # 🔹 Команда /status
-@dp.message_handler(commands=["status"])
+@dp.message(Command("status"))
 async def status_command(message: types.Message):
-	# Здесь можно подтянуть текущие активные позиции из базы
+	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+		return
+	logger.info("Выполнена команда /status")
 	await message.answer("Пока нет открытых позиций.")  # пример
 
 # 🔹 Команда /trades
-@dp.message_handler(commands=["trades"])
+@dp.message(Command("trades"))
 async def trades_command(message: types.Message):
-	# Здесь можно подтянуть историю сделок
+	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+		return
+	logger.info("Выполнена команда /trades")
 	await message.answer("История сделок будет доступна позже.")  # пример
+
+# 🔹 Команда /id (для получения chat_id)
+@dp.message(Command("id"))
+async def get_id(message: types.Message):
+	logger.info(f"Запрос chat_id от пользователя {message.chat.id}")
+	await message.answer(f"Ваш chat_id: {message.chat.id}")
 
 # 🔹 Функция для отправки уведомлений из других модулей
 async def send_trade_notification(trade: dict):
@@ -45,8 +60,29 @@ async def send_trade_notification(trade: dict):
 		f"TP: {trade.get('tp', '-')}\n"
 		f"SL: {trade.get('stop', '-')}"
 	)
-	await bot.send_message(chat_id=YOUR_CHAT_ID, text=msg)
+	logger.info(f"Отправка уведомления: {msg.replace(os.linesep, ' ')}")
+	await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
 
-# 🔹 Запуск бота
+# 🔹 Запуск бота (aiogram v3)
+async def main():
+	logger.info("Запуск Telegram бота...")
+	try:
+		await dp.start_polling(bot)
+	finally:
+		await bot.session.close()
+		logger.info("Сессия Telegram бота закрыта")
+
 if __name__ == "__main__":
-	executor.start_polling(dp, skip_updates=True)
+	asyncio.run(main())
+
+
+
+# if __name__ == "__main__":
+# 	asyncio.run(send_trade_notification({
+# 		"pair": "BTC/USDT",
+# 		"status": "open",
+# 		"entry": "65000",
+# 		"exit": None,
+# 		"tp": "67000",
+# 		"stop": "64000"
+# 	}))
