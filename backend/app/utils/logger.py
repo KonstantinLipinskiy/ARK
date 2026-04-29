@@ -1,24 +1,32 @@
+# app/utils/logger.py
 import os
 import logging
 import logging.config
+from app.services.telegram import send_trade_notification
+
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
 
 def setup_logger(config_path: str = "logging.ini"):
 	"""
-	Настройка логирования из файла logging.ini.
-	Автоматически создаёт папку logs, если её нет.
+	Настройка логирования:
+	- Подключение конфигурации из logging.ini
+	- Возможность расширять кастомными хендлерами (например, Telegram)
 	"""
-	# Создаём папку logs, если она отсутствует
-	os.makedirs("logs", exist_ok=True)
-
-	# Загружаем конфиг
 	logging.config.fileConfig(config_path, disable_existing_loggers=False)
+	logger = logging.getLogger("arkbot")
+	return logger
 
-	# Возвращаем основной логгер arkbot
-	return logging.getLogger("arkbot")
-
-# Инициализация логгера при импорте
+# Инициализация логгера
 logger = setup_logger()
 
-# Тестовые записи (можно убрать в продакшене)
-logger.info("ARK Bot API запущен")
-logger.debug("Отладка стратегии ETH/USDT")
+# 🔹 Критические ошибки + уведомление в Telegram
+def log_critical_error(message: str, **kwargs):
+	"""
+	Логирование критической ошибки + уведомление в Telegram.
+	"""
+	logger.critical(message, extra=kwargs)
+	try:
+		send_trade_notification(f"❌ CRITICAL ERROR: {message}")
+	except Exception as e:
+		logger.error(f"Failed to send Telegram alert: {e}")
