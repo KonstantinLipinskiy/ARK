@@ -6,31 +6,107 @@
 		{
 			"type": "graph",
 			"title": "Winrate (%)",
-			"targets": [
-				{ "expr": "bot_winrate" }
-			]
+			"targets": [{ "expr": "bot_winrate" }],
+			"alert": {
+				"conditions": [
+				{
+					"evaluator": { "type": "lt", "params": [0.4] },
+					"operator": { "type": "and" },
+					"query": { "params": ["A"] },
+					"reducer": { "type": "avg" },
+					"type": "query"
+				}
+				],
+				"notifications": ["telegram"]
+			}
 		},
 		{
 			"type": "graph",
 			"title": "Total Profit",
-			"targets": [
-				{ "expr": "bot_total_profit" }
-			]
+			"targets": [{ "expr": "bot_total_profit" }]
+		},
+		{
+			"type": "graph",
+			"title": "Average Profit per Trade",
+			"targets": [{ "expr": "bot_average_profit" }]
 		},
 		{
 			"type": "graph",
 			"title": "Max Drawdown",
-			"targets": [
-				{ "expr": "bot_max_drawdown" }
-			]
+			"targets": [{ "expr": "bot_max_drawdown" }],
+			"alert": {
+				"conditions": [
+				{
+					"evaluator": { "type": "gt", "params": [100] },
+					"operator": { "type": "and" },
+					"query": { "params": ["A"] },
+					"reducer": { "type": "avg" },
+					"type": "query"
+				}
+				],
+				"notifications": ["telegram"]
+			}
 		},
 		{
 			"type": "graph",
 			"title": "Trades Count",
+			"targets": [{ "expr": "bot_trades_count" }]
+		},
+		{
+			"type": "graph",
+			"title": "Profit Factor",
+			"targets": [{ "expr": "bot_profit_factor" }]
+		},
+		{
+			"type": "graph",
+			"title": "Sharpe Ratio",
+			"targets": [{ "expr": "bot_sharpe_ratio" }]
+		},
+		{
+			"type": "graph",
+			"title": "Sortino Ratio",
+			"targets": [{ "expr": "bot_sortino_ratio" }]
+		},
+		{
+			"type": "piechart",
+			"title": "Win vs Loss Distribution",
 			"targets": [
-				{ "expr": "bot_trades_count" }
+				{ "expr": "sum(increase(bot_trades_count{result='win'}[1d]))" },
+				{ "expr": "sum(increase(bot_trades_count{result='loss'}[1d]))" }
 			]
+		},
+		{
+			"type": "heatmap",
+			"title": "Trading Activity by Hour",
+			"targets": [{ "expr": "histogram_quantile(0.95, sum(rate(bot_trades_count[1h])) by (hour))" }]
+		},
+		{
+			"type": "table",
+			"title": "Recent Trades",
+			"targets": [{ "expr": "bot_recent_trades" }]
 		}
+		],
+		"templating": {
+		"list": [
+			{
+				"name": "symbol",
+				"type": "query",
+				"datasource": "Prometheus",
+				"query": "label_values(bot_trades_count, symbol)"
+			},
+			{
+				"name": "user_id",
+				"type": "query",
+				"datasource": "Prometheus",
+				"query": "label_values(bot_trades_count, user_id)"
+			},
+			{
+				"name": "strategy",
+				"type": "query",
+				"datasource": "Prometheus",
+				"query": "label_values(bot_trades_count, strategy)"
+			}
 		]
+		}
 	}
-}
+	}
