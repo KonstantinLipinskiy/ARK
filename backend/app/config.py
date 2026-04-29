@@ -1,30 +1,36 @@
 import os
 from dotenv import load_dotenv
+from pydantic import BaseSettings
 
 load_dotenv()
 
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
+class Settings(BaseSettings):
+	API_KEY: str = os.getenv("API_KEY")
+	API_SECRET: str = os.getenv("API_SECRET")
+	DATABASE_URL: str = os.getenv("DATABASE_URL")
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+	ENV: str = os.getenv("ENV", "dev")  # dev/testnet/mainnet
+	SQL_ECHO: bool = os.getenv("SQL_ECHO", "False").lower() == "true"
 
-# 🔹 Конфигурация биржи (ccxt)
-EXCHANGE_CONFIG = {
-	"name": "bybit",          # название биржи в ccxt
-	"api_key": API_KEY,         # подтягиваем из .env
-	"api_secret": API_SECRET,   # подтягиваем из .env
-	"mode": "testnet"     # "mock" или "testnet", или "real", 
-}
+	TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
+	TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+	EXCHANGE_CONFIG = {
+		"name": "bybit",
+		"api_key": API_KEY,
+		"api_secret": API_SECRET,
+		"mode": os.getenv("EXCHANGE_MODE", "testnet")
+	}
 
-# 🔹 Параметры риска (глобальные)
-RISK_CONFIG = {
-	"max_risk_per_trade": 0.01,   # 1% от депозита на сделку
-	"max_open_trades": 5,         # ограничение по количеству сделок
-	"max_daily_loss": 0.05        # 5% от депозита в день
-}
+	RISK_CONFIG = {
+		"max_risk_per_trade": 0.01,
+		"max_open_trades": 5,
+		"max_daily_loss": 0.05
+	}
+
+settings = Settings()
+
+
 
 # 🔹 Конфигурация стратегий для валютных пар
 STRATEGY_CONFIG = {

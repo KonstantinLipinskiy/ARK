@@ -11,7 +11,13 @@ def get_exchange():
 		"test": True,   # важно для Testnet
 		"adjustForTimeDifference": True,  # 🔹 синхронизация времени
 		"options": {
-			"defaultType": "spot",   # или "linear"/"inverse" для деривативов
+			"defaultType": "unified",   # ✅ для Unified Trading Account
+		},
+		"urls": {
+			"api": {
+					"public": "https://api-testnet.bybit.com",
+					"private": "https://api-testnet.bybit.com"
+			}
 		}
 	}
 	return exchange_class(params)
