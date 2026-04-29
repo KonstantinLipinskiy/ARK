@@ -8,6 +8,17 @@ API_SECRET = os.getenv("API_SECRET")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# 🔹 Конфигурация биржи (ccxt)
+EXCHANGE_CONFIG = {
+	"name": "bybit",          # название биржи в ccxt
+	"api_key": API_KEY,         # подтягиваем из .env
+	"api_secret": API_SECRET,   # подтягиваем из .env
+	"mode": "testnet"     # "mock" или "testnet", или "real", 
+}
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 # 🔹 Параметры риска (глобальные)
 RISK_CONFIG = {
 	"max_risk_per_trade": 0.01,   # 1% от депозита на сделку
@@ -78,12 +89,4 @@ STRATEGY_CONFIG = {
 	}
 }
 
-# 🔹 Конфигурация биржи (ccxt)
-EXCHANGE_CONFIG = {
-	"name": "binance",          # название биржи в ccxt
-	"api_key": API_KEY,         # подтягиваем из .env
-	"api_secret": API_SECRET,   # подтягиваем из .env
-}
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
