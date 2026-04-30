@@ -48,3 +48,28 @@ def obv(close: pd.Series, volume: pd.Series):
 		else:
 			obv.append(obv[-1])
 	return pd.Series(obv, index=close.index)
+
+# Stochastic Oscillator
+def stochastic(close: pd.Series, high: pd.Series, low: pd.Series, period: int = 14):
+	lowest_low = low.rolling(window=period).min()
+	highest_high = high.rolling(window=period).max()
+	return 100 * (close - lowest_low) / (highest_high - lowest_low)
+
+# Volume SMA (Simple Moving Average of Volume)
+def volume_sma(volume: pd.Series, period: int = 20):
+	return volume.rolling(window=period).mean()
+
+# VWAP (Volume Weighted Average Price)
+def vwap(close: pd.Series, volume: pd.Series):
+	cum_vol = volume.cumsum()
+	cum_vol_price = (close * volume).cumsum()
+	return cum_vol_price / cum_vol
+
+# Ichimoku Cloud
+def ichimoku(high: pd.Series, low: pd.Series, close: pd.Series):
+	conversion_line = (high.rolling(9).max() + low.rolling(9).min()) / 2
+	base_line = (high.rolling(26).max() + low.rolling(26).min()) / 2
+	leading_span_a = ((conversion_line + base_line) / 2).shift(26)
+	leading_span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+	lagging_span = close.shift(-26)
+	return conversion_line, base_line, leading_span_a, leading_span_b, lagging_span

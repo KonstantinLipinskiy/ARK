@@ -35,7 +35,9 @@ RABBITMQ_CONFIG = {
 	"host": os.getenv("RABBITMQ_HOST", "amqp://guest:guest@localhost/"),
 	"queue_signals": os.getenv("RABBITMQ_QUEUE_SIGNALS", "signals"),
 	"queue_trades": os.getenv("RABBITMQ_QUEUE_TRADES", "trades"),
+	"queue_indicators": os.getenv("RABBITMQ_QUEUE_INDICATORS", "indicators_queue"),
 }
+
 
 REDIS_CONFIG = {
 	"host": os.getenv("REDIS_HOST", "localhost"),

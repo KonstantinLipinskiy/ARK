@@ -1,7 +1,5 @@
-# app/broker/rabbitmq.py
 import asyncio
 import aio_pika
-import logging
 from app.utils.logger import logger
 from app.config import RABBITMQ_CONFIG
 
@@ -9,13 +7,14 @@ class RabbitMQBroker:
 	def __init__(self,
 					host: str = RABBITMQ_CONFIG["host"],
 					queue_signals: str = RABBITMQ_CONFIG["queue_signals"],
-					queue_trades: str = RABBITMQ_CONFIG["queue_trades"]):
+					queue_trades: str = RABBITMQ_CONFIG["queue_trades"],
+					queue_indicators: str = RABBITMQ_CONFIG.get("queue_indicators", "indicators_queue")):
 		self.host = host
 		self.queue_signals = queue_signals
 		self.queue_trades = queue_trades
+		self.queue_indicators = queue_indicators
 		self.connection = None
 		self.channel = None
-
 
 	async def connect(self):
 		"""Асинхронное подключение к RabbitMQ."""
@@ -24,6 +23,7 @@ class RabbitMQBroker:
 			self.channel = await self.connection.channel()
 			await self.channel.declare_queue(self.queue_signals, durable=True)
 			await self.channel.declare_queue(self.queue_trades, durable=True)
+			await self.channel.declare_queue(self.queue_indicators, durable=True)
 			logger.info("✅ RabbitMQ connected")
 		except Exception as e:
 			logger.error(f"❌ RabbitMQ connection error: {e}")
@@ -57,6 +57,20 @@ class RabbitMQBroker:
 		except Exception as e:
 			logger.error(f"❌ Failed to publish trade: {e}")
 
+	async def publish_indicator(self, payload: dict):
+		"""Отправка задачи расчёта индикатора в очередь."""
+		try:
+			await self.channel.default_exchange.publish(
+					aio_pika.Message(
+						body=str(payload).encode(),
+						delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+					),
+					routing_key=self.queue_indicators
+			)
+			logger.debug(f"📤 Indicator task published: {payload}")
+		except Exception as e:
+			logger.error(f"❌ Failed to publish indicator task: {e}")
+
 	async def consume_signals(self, callback):
 		"""Получение сигналов из очереди."""
 		try:
@@ -84,6 +98,20 @@ class RabbitMQBroker:
 									logger.error(f"❌ Error processing trade: {e}")
 		except Exception as e:
 			logger.error(f"❌ Failed to consume trades: {e}")
+
+	async def consume_indicators(self, callback):
+		"""Получение задач индикаторов из очереди."""
+		try:
+			queue = await self.channel.declare_queue(self.queue_indicators, durable=True)
+			async with queue.iterator() as q:
+					async for message in q:
+						async with message.process():
+							try:
+									await callback(message.body.decode())
+							except Exception as e:
+									logger.error(f"❌ Error processing indicator task: {e}")
+		except Exception as e:
+			logger.error(f"❌ Failed to consume indicators: {e}")
 
 	async def close(self):
 		"""Закрывает соединение."""
