@@ -31,6 +31,18 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+RABBITMQ_CONFIG = {
+	"host": os.getenv("RABBITMQ_HOST", "amqp://guest:guest@localhost/"),
+	"queue_signals": os.getenv("RABBITMQ_QUEUE_SIGNALS", "signals"),
+	"queue_trades": os.getenv("RABBITMQ_QUEUE_TRADES", "trades"),
+}
+
+REDIS_CONFIG = {
+	"host": os.getenv("REDIS_HOST", "localhost"),
+	"port": int(os.getenv("REDIS_PORT", 6379)),
+	"db": int(os.getenv("REDIS_DB", 0)),
+}
+
 
 # 🔹 Конфигурация стратегий для валютных пар
 STRATEGY_CONFIG = {
