@@ -62,6 +62,7 @@ STRATEGY_CONFIG = {
 		"atr_period": 14,
 		"stop_loss": 0.02,
 		"take_profit_targets": [0.02, 0.04, 0.06],
+		"take_profit_distribution": [0.3, 0.4, 0.3],
 		"trailing_stop": True,
 		"trailing_mode": "step",
 		"allocation_percent": 0.10
@@ -75,6 +76,7 @@ STRATEGY_CONFIG = {
 		"bollinger_period": 20,
 		"stop_loss": 0.025,
 		"take_profit_targets": [0.025, 0.05, 0.075],
+		"take_profit_distribution": [0.3, 0.4, 0.3],
 		"trailing_stop": True,
 		"trailing_mode": "step",
 		"allocation_percent": 0.07
@@ -89,6 +91,7 @@ STRATEGY_CONFIG = {
 		"atr_period": 14,
 		"stop_loss": 0.03,
 		"take_profit_targets": [0.03, 0.06, 0.09],
+		"take_profit_distribution": [0.3, 0.4, 0.3],
 		"trailing_stop": True,
 		"trailing_mode": "step",
 		"allocation_percent": 0.05
@@ -101,6 +104,7 @@ STRATEGY_CONFIG = {
 		"bollinger_period": 20,
 		"stop_loss": 0.035,
 		"take_profit_targets": [0.035, 0.07, 0.105],
+		"take_profit_distribution": [0.3, 0.4, 0.3],
 		"trailing_stop": True,
 		"trailing_mode": "step",
 		"allocation_percent": 0.05
@@ -114,6 +118,7 @@ STRATEGY_CONFIG = {
 		"atr_period": 14,
 		"stop_loss": 0.04,
 		"take_profit_targets": [0.04, 0.08, 0.12],
+		"take_profit_distribution": [0.3, 0.4, 0.3],
 		"trailing_stop": True,
 		"trailing_mode": "step",
 		"allocation_percent": 0.03

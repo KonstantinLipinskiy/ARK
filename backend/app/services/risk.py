@@ -125,14 +125,19 @@ class RiskService:
 					await self.telegram.send_message("❌ Cooldown between trades not respected")
 					return False
 
-			# риск‑ревард проверка (многоуровневые TP)
+			# риск‑ревард проверка (взвешенные TP)
 			rr_ratio = RISK_CONFIG.get("risk_reward_ratio", 1.5)
 			potential_loss = entry_price * stop_loss_pct
 
 			tp_targets = STRATEGY_CONFIG[symbol].get("take_profit_targets", [0.03])
-			# считаем средневзвешенный TP (равномерно, если веса не заданы)
-			avg_tp = sum(tp_targets) / len(tp_targets)
-			potential_profit = entry_price * avg_tp
+			tp_distribution = STRATEGY_CONFIG[symbol].get(
+					"take_profit_distribution",
+					[1 / len(tp_targets)] * len(tp_targets)  # равномерно, если не задано
+			)
+
+			# считаем взвешенный TP
+			weighted_tp = sum(tp * w for tp, w in zip(tp_targets, tp_distribution))
+			potential_profit = entry_price * weighted_tp
 
 			if potential_profit / potential_loss < rr_ratio:
 					await self._log_violation("Risk/Reward ratio too low")
