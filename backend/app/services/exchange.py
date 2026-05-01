@@ -17,6 +17,14 @@ def get_exchange():
 		if "test" in exchange.urls:
 			exchange.urls["api"] = exchange.urls["test"]
 
+	# Устанавливаем тип торговли (spot/futures)
+	market_type = EXCHANGE_CONFIG.get("market_type", "spot")
+	if market_type == "futures":
+		# для Bybit/Binance Futures нужно указать defaultType
+		exchange.options["defaultType"] = "linear"  # USDT‑margined futures
+	else:
+		exchange.options["defaultType"] = "spot"
+
 	return exchange
 
 
@@ -25,7 +33,7 @@ def create_order(symbol, side, amount, price=None):
 	Создание ордера в зависимости от market_type (spot/futures).
 	"""
 	exchange = get_exchange()
-	market_type = STRATEGY_CONFIG[symbol].get("market_type", "spot")
+	market_type = EXCHANGE_CONFIG.get("market_type", "spot")
 
 	if market_type == "spot":
 		# Спотовый ордер
@@ -35,14 +43,14 @@ def create_order(symbol, side, amount, price=None):
 			return exchange.create_market_order(symbol, side, amount)
 
 	elif market_type == "futures":
-		leverage = STRATEGY_CONFIG[symbol].get("leverage", 1)
+		leverage = STRATEGY_CONFIG.get(symbol, {}).get("leverage", 1)
 		exchange.set_leverage(leverage, symbol)
 
 		# Фьючерсный ордер
 		if price:
-			return exchange.create_limit_order(symbol, side, amount, price, params={"type": "future"})
+			return exchange.create_limit_order(symbol, side, amount, price, params={"reduceOnly": False})
 		else:
-			return exchange.create_market_order(symbol, side, amount, params={"type": "future"})
+			return exchange.create_market_order(symbol, side, amount, params={"reduceOnly": False})
 
 
 def get_balance():
@@ -58,6 +66,12 @@ def get_positions(symbol=None):
 	Получение открытых позиций (актуально для фьючерсов).
 	"""
 	exchange = get_exchange()
-	if symbol:
-		return exchange.fetch_positions([symbol])
-	return exchange.fetch_positions()
+	market_type = EXCHANGE_CONFIG.get("market_type", "spot")
+
+	if market_type == "futures":
+		if symbol:
+			return exchange.fetch_positions([symbol])
+		return exchange.fetch_positions()
+	else:
+		# на споте позиций нет, возвращаем баланс
+		return exchange.fetch_balance()

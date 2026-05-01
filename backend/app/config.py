@@ -19,14 +19,20 @@ class Settings(BaseSettings):
 		"name": "bybit",
 		"api_key": API_KEY,
 		"api_secret": API_SECRET,
-		"mode": os.getenv("EXCHANGE_MODE", "testnet")
+		"mode": os.getenv("EXCHANGE_MODE", "testnet"),
+		"market_type": os.getenv("MARKET_TYPE", "spot")  # spot или futures
 	}
 
 	RISK_CONFIG = {
-		"max_risk_per_trade": 0.01,
-		"max_open_trades": 5,
-		"max_daily_loss": 0.05
+		"max_risk_per_trade": 0.01,       # риск на сделку
+		"max_open_trades": 5,             # макс. количество сделок
+		"max_daily_loss": 0.05,           # дневной лимит убытков
+		"max_leverage": 3,                # макс. плечо
+		"cooldown_between_trades": 60,    # задержка между сделками (секунды)
+		"risk_reward_ratio": 1.5,         # минимальное соотношение риск/прибыль
+		"DYNAMIC_ALLOCATION": False       # динамическое распределение риска
 	}
+
 
 settings = Settings()
 
@@ -57,7 +63,8 @@ STRATEGY_CONFIG = {
 		"stop_loss": 0.02,
 		"take_profit_targets": [0.02, 0.04, 0.06],
 		"trailing_stop": True,
-		"trailing_mode": "step"
+		"trailing_mode": "step",
+		"allocation_percent": 0.10
 	},
 	"ETH/USDT": {
 		"enabled_indicators": ["MACD", "Stochastic", "Bollinger", "Volume"],
@@ -69,7 +76,8 @@ STRATEGY_CONFIG = {
 		"stop_loss": 0.025,
 		"take_profit_targets": [0.025, 0.05, 0.075],
 		"trailing_stop": True,
-		"trailing_mode": "step"
+		"trailing_mode": "step",
+		"allocation_percent": 0.07
 	},
 	"BNB/USDT": {
 		"enabled_indicators": ["EMA", "MACD", "ATR", "OBV"],
@@ -82,7 +90,8 @@ STRATEGY_CONFIG = {
 		"stop_loss": 0.03,
 		"take_profit_targets": [0.03, 0.06, 0.09],
 		"trailing_stop": True,
-		"trailing_mode": "step"
+		"trailing_mode": "step",
+		"allocation_percent": 0.05
 	},
 	"SOL/USDT": {
 		"enabled_indicators": ["EMA", "RSI", "Bollinger", "Volume"],
@@ -93,7 +102,8 @@ STRATEGY_CONFIG = {
 		"stop_loss": 0.035,
 		"take_profit_targets": [0.035, 0.07, 0.105],
 		"trailing_stop": True,
-		"trailing_mode": "step"
+		"trailing_mode": "step",
+		"allocation_percent": 0.05
 	},
 	"ADA/USDT": {
 		"enabled_indicators": ["MACD", "Stochastic", "ATR", "OBV"],
@@ -105,7 +115,8 @@ STRATEGY_CONFIG = {
 		"stop_loss": 0.04,
 		"take_profit_targets": [0.04, 0.08, 0.12],
 		"trailing_stop": True,
-		"trailing_mode": "step"
+		"trailing_mode": "step",
+		"allocation_percent": 0.03
 	}
 }
 

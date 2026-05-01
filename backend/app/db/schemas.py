@@ -65,3 +65,11 @@ class UserORM(Base):
 	# связи
 	trades = relationship("TradeORM", back_populates="user")
 	signals = relationship("SignalORM", back_populates="user")
+
+# Таблица логов риск-менеджмента
+class RiskLog(Base):
+	__tablename__ = "risk_logs"
+
+	id = Column(Integer, primary_key=True, index=True)
+	reason = Column(String(255), nullable=False)              # причина нарушения
+	timestamp = Column(DateTime, server_default=func.now())   # когда произошло
