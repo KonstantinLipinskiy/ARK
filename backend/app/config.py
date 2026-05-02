@@ -56,6 +56,9 @@ REDIS_CONFIG = {
 STRATEGY_CONFIG = {
 	"BTC/USDT": {
 		"enabled_indicators": ["EMA", "RSI", "ATR", "OBV"],
+		"entry_conditions": [
+			["EMA", "RSI"]   # вход по EMA crossover + RSI < 30
+		],
 		"ema_short": 12,
 		"ema_long": 26,
 		"rsi_period": 14,
@@ -69,6 +72,10 @@ STRATEGY_CONFIG = {
 	},
 	"ETH/USDT": {
 		"enabled_indicators": ["MACD", "Stochastic", "Bollinger", "Volume"],
+		"entry_conditions": [
+			["MACD"],                # вход по MACD
+			["Bollinger", "Volume"]  # или по Боллинджеру + объёму
+		],
 		"macd_fast": 12,
 		"macd_slow": 26,
 		"macd_signal": 9,
@@ -83,6 +90,10 @@ STRATEGY_CONFIG = {
 	},
 	"BNB/USDT": {
 		"enabled_indicators": ["EMA", "MACD", "ATR", "OBV"],
+		"entry_conditions": [
+			["EMA"],             # вход по EMA crossover
+			["MACD", "ATR"]      # или MACD + ATR
+		],
 		"ema_short": 10,
 		"ema_long": 30,
 		"macd_fast": 12,
@@ -98,6 +109,10 @@ STRATEGY_CONFIG = {
 	},
 	"SOL/USDT": {
 		"enabled_indicators": ["EMA", "RSI", "Bollinger", "Volume"],
+		"entry_conditions": [
+			["EMA", "RSI"],      # EMA crossover + RSI
+			["Bollinger"]        # или вход по нижней границе Боллинджера
+		],
 		"ema_short": 20,
 		"ema_long": 50,
 		"rsi_period": 14,
@@ -111,6 +126,10 @@ STRATEGY_CONFIG = {
 	},
 	"ADA/USDT": {
 		"enabled_indicators": ["MACD", "Stochastic", "ATR", "OBV"],
+		"entry_conditions": [
+			["MACD"],                # вход по MACD
+			["Stochastic", "ATR"]    # или Stochastic + ATR
+		],
 		"macd_fast": 12,
 		"macd_slow": 26,
 		"macd_signal": 9,
@@ -124,5 +143,6 @@ STRATEGY_CONFIG = {
 		"allocation_percent": 0.03
 	}
 }
+
 
 

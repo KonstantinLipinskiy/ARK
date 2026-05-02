@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, DateTime 
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -73,3 +73,20 @@ class RiskLog(Base):
 	id = Column(Integer, primary_key=True, index=True)
 	reason = Column(String(255), nullable=False)              # причина нарушения
 	timestamp = Column(DateTime, server_default=func.now())   # когда произошло
+
+
+class BacktestReport(Base):
+	__tablename__ = "backtest_reports"
+
+	id = Column(Integer, primary_key=True, index=True)
+	symbol = Column(String(20), nullable=False, index=True)          # пара (BTC/USDT)
+	strategy = Column(String(50), nullable=False, index=True)        # название стратегии (EMA+RSI)
+	winrate = Column(Float, nullable=False)                          # винрейт %
+	avg_profit = Column(Float, nullable=False)                       # средний профит
+	max_drawdown = Column(Float, nullable=False)                     # максимальная просадка
+	sharpe = Column(Float, nullable=False)                           # Sharpe ratio
+	created_at = Column(DateTime, server_default=func.now())         # дата запуска бэктеста
+
+	# связь с пользователем
+	user_id = Column(Integer, ForeignKey("users.id"))
+	user = relationship("UserORM", back_populates="backtest_reports")
