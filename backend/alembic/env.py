@@ -1,18 +1,16 @@
 import os
 import sys
-import os
-
 from logging.config import fileConfig
-
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import pool
+from sqlalchemy import engine_from_config
 from alembic import context
 
+# Подключаем проект
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Импортируем Base и все ORM‑модели
 from app.db.base import Base
 from app.db import schemas
-
 
 # Загружаем конфиг Alembic
 config = context.config
@@ -21,10 +19,15 @@ config = context.config
 from dotenv import load_dotenv
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./arkbot.db")
+# --- Разделение окружений ---
+if os.getenv("USE_TESTNET") == "true":
+	DATABASE_URL = os.getenv("DATABASE_URL_TESTNET")
+else:
+	DATABASE_URL = os.getenv("DATABASE_URL_MAINNET", os.getenv("DATABASE_URL", "sqlite:///./arkbot.db"))
+
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
-# Логирование
+# Логирование Alembic
 if config.config_file_name is not None:
 	fileConfig(config.config_file_name)
 
@@ -40,24 +43,22 @@ def run_migrations_offline():
 		literal_binds=True,
 		dialect_opts={"paramstyle": "named"},
 	)
-
 	with context.begin_transaction():
 		context.run_migrations()
 
 def run_migrations_online():
 	"""Запуск миграций в онлайн-режиме (с подключением к БД)."""
-	connectable = engine_from_config(
-		config.get_section(config.config_ini_section),
-		prefix="sqlalchemy.",
-		poolclass=pool.NullPool,
-	)
+	try:
+		connectable = engine_from_config(
+			config.get_section(config.config_ini_section),
+			prefix="sqlalchemy.",
+			poolclass=pool.NullPool,
+		)
+	except Exception as e:
+		raise RuntimeError(f"Ошибка подключения к БД: {e}")
 
 	with connectable.connect() as connection:
-		context.configure(
-			connection=connection,
-			target_metadata=target_metadata
-		)
-
+		context.configure(connection=connection, target_metadata=target_metadata)
 		with context.begin_transaction():
 			context.run_migrations()
 
