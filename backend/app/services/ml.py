@@ -1,4 +1,5 @@
 import pandas as pd
+import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 import torch
@@ -12,13 +13,19 @@ class MLService:
 		self.model = None
 
 	def prepare_data(self, trades: list[dict]) -> pd.DataFrame:
-		"""Преобразует список сделок в DataFrame для обучения."""
-		return pd.DataFrame(trades)
+		"""Преобразует список сделок в DataFrame для обучения и добавляет derived features."""
+		df = pd.DataFrame(trades)
+		if "timestamp" in df.columns:
+			df["hour"] = pd.to_datetime(df["timestamp"]).dt.hour
+		# пример расширения признаков
+		if "high" in df.columns and "low" in df.columns and "close" in df.columns:
+			df["atr"] = (df["high"] - df["low"]).rolling(window=14).mean()
+		return df
 
 	# === Scikit-learn ===
 	def train_sklearn(self, df: pd.DataFrame):
 		"""Пример обучения модели Scikit-learn."""
-		X = df[["ema", "rsi", "macd"]]
+		X = df[["ema", "rsi", "macd", "hour", "atr"]].fillna(0)
 		y = df["result"]
 		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 		self.model = RandomForestClassifier()
@@ -77,3 +84,34 @@ class MLService:
 		"""Пример использования HuggingFace для анализа новостей."""
 		sentiment = pipeline("sentiment-analysis")
 		return sentiment(text)[0]
+
+	# === Сохранение/загрузка моделей ===
+	def save_model(self, path: str):
+		"""Сохраняет модель на диск."""
+		if self.model is None:
+			raise ValueError("Нет обученной модели для сохранения")
+		if isinstance(self.model, RandomForestClassifier):
+			joblib.dump(self.model, path)
+		elif isinstance(self.model, nn.Module):
+			torch.save(self.model.state_dict(), path)
+		elif isinstance(self.model, keras.Model):
+			self.model.save(path)
+		else:
+			raise TypeError("Неизвестный тип модели")
+
+	def load_model(self, path: str, model_type: str):
+		"""Загружает модель с диска."""
+		if model_type == "sklearn":
+			self.model = joblib.load(path)
+		elif model_type == "pytorch":
+			model = nn.Sequential(
+					nn.Linear(3, 16),
+					nn.ReLU(),
+					nn.Linear(16, 2)
+			)
+			model.load_state_dict(torch.load(path))
+			self.model = model
+		elif model_type == "tensorflow":
+			self.model = keras.models.load_model(path)
+		else:
+			raise ValueError("Неизвестный тип модели")
