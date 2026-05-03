@@ -8,11 +8,13 @@ class RabbitMQBroker:
 					host: str = RABBITMQ_CONFIG["host"],
 					queue_signals: str = RABBITMQ_CONFIG["queue_signals"],
 					queue_trades: str = RABBITMQ_CONFIG["queue_trades"],
-					queue_indicators: str = RABBITMQ_CONFIG.get("queue_indicators", "indicators_queue")):
+					queue_indicators: str = RABBITMQ_CONFIG.get("queue_indicators", "indicators_queue"),
+					queue_telegram: str = RABBITMQ_CONFIG.get("queue_telegram", "telegram_notifications")):
 		self.host = host
 		self.queue_signals = queue_signals
 		self.queue_trades = queue_trades
 		self.queue_indicators = queue_indicators
+		self.queue_telegram = queue_telegram
 		self.connection = None
 		self.channel = None
 
@@ -24,6 +26,7 @@ class RabbitMQBroker:
 			await self.channel.declare_queue(self.queue_signals, durable=True)
 			await self.channel.declare_queue(self.queue_trades, durable=True)
 			await self.channel.declare_queue(self.queue_indicators, durable=True)
+			await self.channel.declare_queue(self.queue_telegram, durable=True)
 			logger.info("✅ RabbitMQ connected")
 		except Exception as e:
 			logger.error(f"❌ RabbitMQ connection error: {e}")
@@ -71,6 +74,20 @@ class RabbitMQBroker:
 		except Exception as e:
 			logger.error(f"❌ Failed to publish indicator task: {e}")
 
+	async def publish_telegram(self, payload: dict):
+		"""Отправка уведомления в очередь Telegram."""
+		try:
+			await self.channel.default_exchange.publish(
+					aio_pika.Message(
+						body=str(payload).encode(),
+						delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+					),
+					routing_key=self.queue_telegram
+			)
+			logger.debug(f"📤 Telegram notification published: {payload}")
+		except Exception as e:
+			logger.error(f"❌ Failed to publish telegram notification: {e}")
+
 	async def consume_signals(self, callback):
 		"""Получение сигналов из очереди."""
 		try:
@@ -112,6 +129,20 @@ class RabbitMQBroker:
 									logger.error(f"❌ Error processing indicator task: {e}")
 		except Exception as e:
 			logger.error(f"❌ Failed to consume indicators: {e}")
+
+	async def consume_telegram(self, callback):
+		"""Получение уведомлений из очереди Telegram."""
+		try:
+			queue = await self.channel.declare_queue(self.queue_telegram, durable=True)
+			async with queue.iterator() as q:
+					async for message in q:
+						async with message.process():
+							try:
+									await callback(message.body.decode())
+							except Exception as e:
+									logger.error(f"❌ Error processing telegram notification: {e}")
+		except Exception as e:
+			logger.error(f"❌ Failed to consume telegram notifications: {e}")
 
 	async def close(self):
 		"""Закрывает соединение."""

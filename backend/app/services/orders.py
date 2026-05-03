@@ -2,8 +2,13 @@ import ccxt.async_support as ccxt
 from app.config import EXCHANGE_CONFIG
 from app.utils.logger import logger
 from app.services.risk import RiskService
-from app.services.telegram import TelegramService
+from app.services.rabbitmq import RabbitMQBroker   # добавлен брокер
 from app.db.schemas import TradeORM
+
+broker = RabbitMQBroker()
+# подключение к брокеру при старте (можно вынести в init приложения)
+import asyncio
+asyncio.create_task(broker.connect())
 
 # --- INIT ---
 def get_exchange():
@@ -37,7 +42,6 @@ async def create_order(
 	price: float = None,
 	stop_price: float = None,
 	risk_service: RiskService = None,
-	telegram: TelegramService = None
 ):
 	try:
 		# Проверка риска
@@ -78,15 +82,13 @@ async def create_order(
 		risk_service.db_session.add(trade)
 		await risk_service.db_session.commit()
 
-		# Уведомление в Telegram
-		if telegram:
-			await telegram.send_message(f"✅ Order created: {symbol} {side} {amount} {order_type}")
+		# Уведомление через RabbitMQ
+		await broker.publish_telegram({"text": f"✅ Order created: {symbol} {side} {amount} {order_type}"})
 
 		return order
 	except Exception as e:
 		logger.error(f"❌ Order error: {e}")
-		if telegram:
-			await telegram.send_message(f"❌ Order failed: {e}")
+		await broker.publish_telegram({"text": f"❌ Order failed: {e}"})
 		return {"error": str(e)}
 
 # --- STOP ORDER ---
@@ -97,7 +99,6 @@ async def create_stop_order(
 	stop_price: float,
 	order_type: str = "stop_market",
 	risk_service: RiskService = None,
-	telegram: TelegramService = None
 ):
 	try:
 		if risk_service:
@@ -113,12 +114,12 @@ async def create_stop_order(
 		risk_service.db_session.add(trade)
 		await risk_service.db_session.commit()
 
-		if telegram:
-			await telegram.send_message(f"📌 Stop order created: {symbol} {side} {amount} @ {stop_price}")
+		await broker.publish_telegram({"text": f"📌 Stop order created: {symbol} {side} {amount} @ {stop_price}"})
 
 		return order
 	except Exception as e:
 		logger.error(f"❌ Stop order error: {e}")
+		await broker.publish_telegram({"text": f"❌ Stop order failed: {e}"})
 		return {"error": str(e)}
 
 # --- OCO ORDER ---
@@ -129,7 +130,6 @@ async def create_oco_order(
 	price: float,
 	stop_price: float,
 	risk_service: RiskService = None,
-	telegram: TelegramService = None
 ):
 	try:
 		exchange = get_exchange()
@@ -144,12 +144,12 @@ async def create_oco_order(
 		risk_service.db_session.add(trade)
 		await risk_service.db_session.commit()
 
-		if telegram:
-			await telegram.send_message(f"🔀 OCO order created: {symbol} {side} {amount} TP={price}, SL={stop_price}")
+		await broker.publish_telegram({"text": f"🔀 OCO order created: {symbol} {side} {amount} TP={price}, SL={stop_price}"})
 
 		return order
 	except Exception as e:
 		logger.error(f"❌ OCO order error: {e}")
+		await broker.publish_telegram({"text": f"❌ OCO order failed: {e}"})
 		return {"error": str(e)}
 
 # --- FUTURES ORDER ---
@@ -163,7 +163,6 @@ async def create_futures_order(
 	reduce_only: bool = False,
 	margin_type: str = "isolated",
 	risk_service: RiskService = None,
-	telegram: TelegramService = None
 ):
 	try:
 		if risk_service:
@@ -185,24 +184,24 @@ async def create_futures_order(
 		risk_service.db_session.add(trade)
 		await risk_service.db_session.commit()
 
-		if telegram:
-			await telegram.send_message(f"⚡ Futures order created: {symbol} {side} {amount} x{leverage}")
+		await broker.publish_telegram({"text": f"⚡ Futures order created: {symbol} {side} {amount} x{leverage}"})
 
 		return order
 	except Exception as e:
 		logger.error(f"❌ Futures order error: {e}")
+		await broker.publish_telegram({"text": f"❌ Futures order failed: {e}"})
 		return {"error": str(e)}
 
 # --- CANCEL ORDER ---
-async def cancel_order(symbol: str, order_id: str, telegram: TelegramService = None):
+async def cancel_order(symbol: str, order_id: str):
 	try:
 		exchange = get_exchange()
 		result = await exchange.cancel_order(order_id, symbol)
-		if telegram:
-			await telegram.send_message(f"⚠️ Order canceled: {order_id}")
+		await broker.publish_telegram({"text": f"⚠️ Order canceled: {order_id}"})
 		return result
 	except Exception as e:
 		logger.error(f"❌ Cancel error: {e}")
+		await broker.publish_telegram({"text": f"❌ Cancel order failed: {e}"})
 		return {"error": str(e)}
 
 # --- MARKET DATA ---

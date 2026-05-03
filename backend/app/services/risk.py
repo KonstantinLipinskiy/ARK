@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import STRATEGY_CONFIG, RISK_CONFIG
 from app.db.schemas import RiskLog
 from app.utils.logger import logger
-from app.services.telegram import TelegramService
+from app.services.rabbitmq import RabbitMQBroker  # добавлен импорт брокера
 
 class RiskService:
 	"""
@@ -12,13 +12,15 @@ class RiskService:
 	- Расчёт размера позиции
 	- Проверка стоп‑лоссов, лимитов и трейлинг‑стопов
 	- Унификация проверок через validate_trade()
-	- Интеграция с БД и Telegram
+	- Интеграция с БД и RabbitMQ (уведомления в Telegram через воркер)
 	"""
 
-	def __init__(self, db_session: AsyncSession, telegram: TelegramService):
+	def __init__(self, db_session: AsyncSession):
 		self.db_session = db_session
-		self.telegram = telegram
+		self.broker = RabbitMQBroker()
 		self.last_trade_time = None
+		# подключение к брокеру при инициализации
+		asyncio.create_task(self.broker.connect())
 
 	async def calculate_position_size(
 		self,
@@ -28,45 +30,25 @@ class RiskService:
 		stop_loss_pct: float,
 		strength: float = 1.0
 	) -> float:
-		"""
-		Расчёт размера позиции с учётом:
-		- риска (max_risk_per_trade),
-		- allocation_percent для пары,
-		- динамического распределения (strength),
-		- максимального плеча.
-		"""
-
-		# 1. Базовый риск
+		"""Расчёт размера позиции с учётом риска, allocation и плеча."""
 		risk_amount = deposit * RISK_CONFIG["max_risk_per_trade"]
 
 		if RISK_CONFIG.get("DYNAMIC_ALLOCATION", False):
-			risk_amount *= min(strength, 2.0)  # ограничиваем коэффициент
+			risk_amount *= min(strength, 2.0)
 
-		# 2. Ограничение по проценту депозита для пары
 		allocation_percent = STRATEGY_CONFIG[symbol].get("allocation_percent", 0.05)
 		allocated_deposit = deposit * allocation_percent
 
-		# 3. Потеря на 1 монету при стопе
 		stop_loss_amount = entry_price * stop_loss_pct
-
-		# 4. Размер позиции по риску
 		position_size_by_risk = risk_amount / stop_loss_amount
-
-		# 5. Размер позиции по allocation_percent
 		position_size_by_allocation = allocated_deposit / entry_price
 
-		# 6. Итоговый размер позиции = минимум из двух
 		position_size = min(position_size_by_risk, position_size_by_allocation)
-
-		# 7. Ограничение плечом
 		max_position = (deposit * RISK_CONFIG.get("max_leverage", 1)) / entry_price
 		return min(position_size, max_position)
 
 	# --- Stop Loss ---
 	def apply_stop_loss(self, entry_price: float, stop_loss_pct: float, direction: str = "long") -> float:
-		"""
-		Рассчитывает уровень стоп‑лосса для long и short.
-		"""
 		if direction == "long":
 			return entry_price * (1 - stop_loss_pct)
 		elif direction == "short":
@@ -74,9 +56,6 @@ class RiskService:
 
 	# --- Take Profit ---
 	def apply_take_profit(self, entry_price: float, targets: list[float], direction: str = "long") -> list[float]:
-		"""
-		Рассчитывает уровни тейк‑профита для long и short.
-		"""
 		if direction == "long":
 			return [entry_price * (1 + tp) for tp in targets]
 		elif direction == "short":
@@ -84,9 +63,6 @@ class RiskService:
 
 	# --- Trailing Stop ---
 	def apply_trailing_stop(self, current_price: float, stop_price: float, trailing_pct: float, direction: str = "long") -> float:
-		"""
-		Двигает стоп за ценой для long и short.
-		"""
 		if direction == "long":
 			new_stop = current_price * (1 - trailing_pct)
 			return max(stop_price, new_stop)
@@ -118,28 +94,25 @@ class RiskService:
 		total_loss_pct: float,
 		strength: float = 1.0
 	) -> bool:
-		"""
-		Унифицированная проверка всех условий риска.
-		"""
+		"""Унифицированная проверка всех условий риска."""
 		try:
 			position_size = await self.calculate_position_size(symbol, deposit, entry_price, stop_loss_pct, strength)
 
 			if not self.check_daily_loss(total_loss_pct):
 					await self._log_violation("Daily loss limit exceeded")
-					await self.telegram.send_message("❌ Daily loss limit exceeded")
+					await self.broker.publish_telegram({"text": "❌ Daily loss limit exceeded"})
 					return False
 
 			if not self.check_open_trades(open_trades):
 					await self._log_violation("Too many open trades")
-					await self.telegram.send_message("❌ Too many open trades")
+					await self.broker.publish_telegram({"text": "❌ Too many open trades"})
 					return False
 
 			if not self.check_cooldown():
 					await self._log_violation("Cooldown between trades not respected")
-					await self.telegram.send_message("❌ Cooldown between trades not respected")
+					await self.broker.publish_telegram({"text": "❌ Cooldown between trades not respected"})
 					return False
 
-			# риск‑ревард проверка
 			rr_ratio = RISK_CONFIG.get("risk_reward_ratio", 1.5)
 			potential_loss = entry_price * stop_loss_pct
 
@@ -154,7 +127,7 @@ class RiskService:
 
 			if potential_profit / potential_loss < rr_ratio:
 					await self._log_violation("Risk/Reward ratio too low")
-					await self.telegram.send_message("❌ Risk/Reward ratio too low")
+					await self.broker.publish_telegram({"text": "❌ Risk/Reward ratio too low"})
 					return False
 
 			self.last_trade_time = datetime.utcnow()
@@ -165,9 +138,7 @@ class RiskService:
 			return False
 
 	async def _log_violation(self, reason: str):
-		"""
-		Сохраняет нарушение риск‑менеджмента в таблицу risk_logs.
-		"""
+		"""Сохраняет нарушение риск‑менеджмента в таблицу risk_logs."""
 		try:
 			log = RiskLog(reason=reason, timestamp=datetime.utcnow())
 			self.db_session.add(log)
