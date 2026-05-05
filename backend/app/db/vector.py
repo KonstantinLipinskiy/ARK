@@ -1,4 +1,3 @@
-# app/db/vector.py
 import os
 from qdrant_client import QdrantClient
 from qdrant_client.http import models

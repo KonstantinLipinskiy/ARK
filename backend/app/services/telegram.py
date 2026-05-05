@@ -12,14 +12,11 @@ from app.db.schemas import TradeORM, SignalORM
 from app.config import STRATEGY_CONFIG, RISK_CONFIG
 from app.services.rabbitmq import RabbitMQBroker
 from app.utils.metrics import calculate_metrics
+from app.config import Settings
 
-# Загружаем токен и chat_id из .env
-load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+settings = Settings()
+bot = Bot(token=settings.TELEGRAM_TOKEN)
 
-# Инициализация бота
-bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
 # --- TelegramService для использования в risk.py и orders.py ---
@@ -47,14 +44,13 @@ class TelegramService:
 		msg = f"❌ Ошибка: {error}"
 		await self.send_message(msg)
 
-
-telegram_service = TelegramService(bot, TELEGRAM_CHAT_ID)
+telegram_service = TelegramService(bot, settings.TELEGRAM_CHAT_ID)
 broker = RabbitMQBroker()
 
 # --- Команды ---
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
-	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+	if str(message.chat.id) != settings.TELEGRAM_CHAT_ID:
 		logger.warning(f"Попытка доступа от чужого chat_id: {message.chat.id}")
 		return
 	logger.info("Выполнена команда /start")
@@ -62,7 +58,7 @@ async def start_command(message: types.Message):
 
 @dp.message(Command("status"))
 async def status_command(message: types.Message):
-	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+	if str(message.chat.id) != settings.TELEGRAM_CHAT_ID:
 		return
 	logger.info("Выполнена команда /status")
 	async with AsyncSession() as session:
@@ -76,7 +72,7 @@ async def status_command(message: types.Message):
 
 @dp.message(Command("trades"))
 async def trades_command(message: types.Message):
-	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+	if str(message.chat.id) != settings.TELEGRAM_CHAT_ID:
 		return
 	logger.info("Выполнена команда /trades")
 	async with AsyncSession() as session:
@@ -91,7 +87,7 @@ async def trades_command(message: types.Message):
 
 @dp.message(Command("report"))
 async def report_command(message: types.Message):
-	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+	if str(message.chat.id) != settings.TELEGRAM_CHAT_ID:
 		return
 	logger.info("Выполнена команда /report")
 	async with AsyncSession() as session:
@@ -115,21 +111,21 @@ async def report_command(message: types.Message):
 
 @dp.message(Command("config"))
 async def config_command(message: types.Message):
-	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+	if str(message.chat.id) != settings.TELEGRAM_CHAT_ID:
 		return
 	logger.info("Выполнена команда /config")
 	await message.answer(f"⚙️ Текущие настройки стратегии:\n{STRATEGY_CONFIG}")
 
 @dp.message(Command("risk"))
 async def risk_command(message: types.Message):
-	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+	if str(message.chat.id) != settings.TELEGRAM_CHAT_ID:
 		return
 	logger.info("Выполнена команда /risk")
 	await message.answer(f"📉 Лимиты риск менеджмента:\n{RISK_CONFIG}")
 
 @dp.message(Command("signal"))
 async def signal_command(message: types.Message):
-	if str(message.chat.id) != TELEGRAM_CHAT_ID:
+	if str(message.chat.id) != settings.TELEGRAM_CHAT_ID:
 		return
 	logger.info("Выполнена команда /signal")
 	async with AsyncSession() as session:

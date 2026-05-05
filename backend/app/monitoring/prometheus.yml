@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s        # как часто собирать метрики
+  evaluation_interval: 15s    # как часто пересчитывать правила
+
+scrape_configs:
+  # Метрики самого Prometheus
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Метрики ARK Bot API
+  - job_name: "ark_bot"
+    metrics_path: /metrics     # эндпоинт, который ты реализовал в prometheus.py
+    static_configs:
+      - targets: ["ark_bot:8000"]   # если API работает как сервис в docker-compose
+        # или "host.docker.internal:8000" если API локально, а Prometheus в Docker
+        # или "localhost:8000" если оба локально без Docker

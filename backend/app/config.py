@@ -33,6 +33,8 @@ class Settings(BaseSettings):
 		"DYNAMIC_ALLOCATION": False       # динамическое распределение риска
 	}
 
+	ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
 
 settings = Settings()
 
