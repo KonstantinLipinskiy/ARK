@@ -5,7 +5,7 @@ from app.config import DATABASE_URL
 
 # --- Асинхронный движок ---
 engine = create_async_engine(
-	DATABASE_URL,
+	DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),  # важно для asyncpg
 	echo=os.getenv("SQL_ECHO", "false").lower() == "true",  # логирование SQL при отладке
 	pool_size=int(os.getenv("DB_POOL_SIZE", 10)),           # размер пула соединений
 	max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 20)),     # доп. соединения сверх пула

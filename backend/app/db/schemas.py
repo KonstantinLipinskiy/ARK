@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, JSON
 from sqlalchemy.orm import relationship
 import enum
 from app.db.base import Base
@@ -37,12 +37,16 @@ class TradeORM(Base):
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	status = Column(Enum(TradeStatus), default=TradeStatus.open)
 
+	# 🔹 новое поле для синхронизации с биржей
+	exchange_order_id = Column(String(50), unique=True, index=True)
+
 	# связи
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="trades")
 
 	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
 	signal = relationship("SignalORM", back_populates="trades")
+
 
 # --- Таблица сигналов ---
 class SignalORM(Base):
@@ -71,7 +75,11 @@ class UserORM(Base):
 	username = Column(String(50), unique=True, nullable=False, index=True)
 	email = Column(String(255), unique=True, nullable=False, index=True)
 	role = Column(Enum(UserRole), default=UserRole.trader)
-	status = Column(Enum(UserStatus), default=UserStatus.active, index=True)
+	status = Column(
+		Enum(UserStatus, name="userstatus", create_type=True),
+		default=UserStatus.active,
+		index=True
+	)
 	telegram_id = Column(String(50), unique=True, index=True)
 	password_hash = Column(String(255), nullable=False)
 	created_at = Column(DateTime, server_default=func.now())
@@ -80,6 +88,7 @@ class UserORM(Base):
 	trades = relationship("TradeORM", back_populates="user", cascade="all, delete-orphan")
 	signals = relationship("SignalORM", back_populates="user", cascade="all, delete-orphan")
 	backtest_reports = relationship("BacktestReport", back_populates="user", cascade="all, delete-orphan")
+
 
 # --- Таблица логов риск-менеджмента ---
 class RiskLog(Base):
@@ -105,3 +114,54 @@ class BacktestReport(Base):
 	# связь с пользователем
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="backtest_reports")
+
+class StrategyORM(Base):
+	__tablename__ = "strategies"
+
+	id = Column(Integer, primary_key=True, index=True)
+	symbol = Column(String, nullable=False)              # BTC/USDT, ETH/USDT
+	enabled_indicators = Column(JSON, nullable=False)    # ["EMA", "RSI", "ATR"]
+	entry_conditions = Column(JSON, nullable=True)       # [["EMA", "RSI"], ["MACD"]]
+
+	# параметры индикаторов
+	ema_short = Column(Integer, nullable=True)
+	ema_long = Column(Integer, nullable=True)
+	rsi_period = Column(Integer, nullable=True)
+	atr_period = Column(Integer, nullable=True)
+	macd_fast = Column(Integer, nullable=True)
+	macd_slow = Column(Integer, nullable=True)
+	macd_signal = Column(Integer, nullable=True)
+	stochastic_period = Column(Integer, nullable=True)
+	bollinger_period = Column(Integer, nullable=True)
+
+	# риск-менеджмент
+	stop_loss = Column(Float, nullable=False)
+	take_profit_targets = Column(JSON, nullable=False)   # [0.02, 0.04, 0.06]
+	take_profit_distribution = Column(JSON, nullable=True)
+	trailing_stop = Column(Boolean, default=False)
+	trailing_mode = Column(String, default="step")
+
+	# аллокация и плечо
+	allocation_percent = Column(Float, nullable=False)
+	leverage = Column(Integer, default=1)
+
+
+# --- Таблица настроек риск-менеджмента ---
+class RiskSettingsORM(Base):
+	__tablename__ = "risk_settings"
+
+	id = Column(Integer, primary_key=True, index=True)
+
+	# 🔹 Основные лимиты
+	max_risk_per_trade = Column(Float, nullable=False, default=0.01)   # макс. риск на сделку (% депозита)
+	max_open_trades = Column(Integer, nullable=False, default=5)       # макс. число открытых сделок
+	max_daily_loss = Column(Float, nullable=False, default=0.05)       # макс. дневной убыток (% депозита)
+	max_leverage = Column(Integer, nullable=False, default=3)          # макс. плечо
+
+	# 🔹 Дополнительные параметры
+	cooldown_between_trades = Column(Integer, nullable=False, default=60)  # задержка между сделками (сек)
+	risk_reward_ratio = Column(Float, nullable=False, default=1.5)         # соотношение риск/прибыль
+	dynamic_allocation = Column(Boolean, nullable=False, default=False)    # включена ли динамическая аллокация
+
+	# 🔹 Метаданные
+	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

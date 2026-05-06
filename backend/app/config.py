@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
-from pydantic import BaseSettings
+from typing import ClassVar
+from pydantic_settings import BaseSettings
 
 load_dotenv()
 
@@ -9,34 +10,32 @@ class Settings(BaseSettings):
 	API_SECRET: str = os.getenv("API_SECRET")
 	DATABASE_URL: str = os.getenv("DATABASE_URL")
 
-	ENV: str = os.getenv("ENV", "dev")  # dev/testnet/mainnet
+	ENV: str = os.getenv("ENV", "dev")  # dev / mainnet / testnet
 	SQL_ECHO: bool = os.getenv("SQL_ECHO", "False").lower() == "true"
 
 	TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
 	TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
 
-	EXCHANGE_CONFIG = {
+	TRADING_MODE: str = os.getenv("TRADING_MODE", "spot")  # spot / futures
+	USE_TESTNET: bool = os.getenv("USE_TESTNET", "false").lower() == "true"
+
+	JWT_SECRET: str = os.getenv("JWT_SECRET", "default_secret")
+
+	# 🔹 Централизованная конфигурация биржи
+	EXCHANGE_CONFIG: ClassVar[dict] = {
 		"name": "bybit",
-		"api_key": API_KEY,
-		"api_secret": API_SECRET,
-		"mode": os.getenv("EXCHANGE_MODE", "testnet"),
-		"market_type": os.getenv("MARKET_TYPE", "spot")  # spot или futures
+		"api_key": os.getenv("API_KEY"),
+		"api_secret": os.getenv("API_SECRET"),
+		"mode": "testnet" if os.getenv("USE_TESTNET", "false").lower() == "true" else "mainnet",
+		"market_type": os.getenv("TRADING_MODE", "spot"),
 	}
 
-	RISK_CONFIG = {
-		"max_risk_per_trade": 0.01,       # риск на сделку
-		"max_open_trades": 5,             # макс. количество сделок
-		"max_daily_loss": 0.05,           # дневной лимит убытков
-		"max_leverage": 3,                # макс. плечо
-		"cooldown_between_trades": 60,    # задержка между сделками (секунды)
-		"risk_reward_ratio": 1.5,         # минимальное соотношение риск/прибыль
-		"DYNAMIC_ALLOCATION": False       # динамическое распределение риска
-	}
-
-	ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+	ALLOWED_ORIGINS: list[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 
 settings = Settings()
+
+DATABASE_URL = settings.DATABASE_URL
 
 
 RABBITMQ_CONFIG = {
@@ -54,97 +53,9 @@ REDIS_CONFIG = {
 }
 
 
-# 🔹 Конфигурация стратегий для валютных пар
-STRATEGY_CONFIG = {
-	"BTC/USDT": {
-		"enabled_indicators": ["EMA", "RSI", "ATR", "OBV"],
-		"entry_conditions": [
-			["EMA", "RSI"]   # вход по EMA crossover + RSI < 30
-		],
-		"ema_short": 12,
-		"ema_long": 26,
-		"rsi_period": 14,
-		"atr_period": 14,
-		"stop_loss": 0.02,
-		"take_profit_targets": [0.02, 0.04, 0.06],
-		"take_profit_distribution": [0.3, 0.4, 0.3],
-		"trailing_stop": True,
-		"trailing_mode": "step",
-		"allocation_percent": 0.10
-	},
-	"ETH/USDT": {
-		"enabled_indicators": ["MACD", "Stochastic", "Bollinger", "Volume"],
-		"entry_conditions": [
-			["MACD"],                # вход по MACD
-			["Bollinger", "Volume"]  # или по Боллинджеру + объёму
-		],
-		"macd_fast": 12,
-		"macd_slow": 26,
-		"macd_signal": 9,
-		"stochastic_period": 14,
-		"bollinger_period": 20,
-		"stop_loss": 0.025,
-		"take_profit_targets": [0.025, 0.05, 0.075],
-		"take_profit_distribution": [0.3, 0.4, 0.3],
-		"trailing_stop": True,
-		"trailing_mode": "step",
-		"allocation_percent": 0.07
-	},
-	"BNB/USDT": {
-		"enabled_indicators": ["EMA", "MACD", "ATR", "OBV"],
-		"entry_conditions": [
-			["EMA"],             # вход по EMA crossover
-			["MACD", "ATR"]      # или MACD + ATR
-		],
-		"ema_short": 10,
-		"ema_long": 30,
-		"macd_fast": 12,
-		"macd_slow": 26,
-		"macd_signal": 9,
-		"atr_period": 14,
-		"stop_loss": 0.03,
-		"take_profit_targets": [0.03, 0.06, 0.09],
-		"take_profit_distribution": [0.3, 0.4, 0.3],
-		"trailing_stop": True,
-		"trailing_mode": "step",
-		"allocation_percent": 0.05
-	},
-	"SOL/USDT": {
-		"enabled_indicators": ["EMA", "RSI", "Bollinger", "Volume"],
-		"entry_conditions": [
-			["EMA", "RSI"],      # EMA crossover + RSI
-			["Bollinger"]        # или вход по нижней границе Боллинджера
-		],
-		"ema_short": 20,
-		"ema_long": 50,
-		"rsi_period": 14,
-		"bollinger_period": 20,
-		"stop_loss": 0.035,
-		"take_profit_targets": [0.035, 0.07, 0.105],
-		"take_profit_distribution": [0.3, 0.4, 0.3],
-		"trailing_stop": True,
-		"trailing_mode": "step",
-		"allocation_percent": 0.05
-	},
-	"ADA/USDT": {
-		"enabled_indicators": ["MACD", "Stochastic", "ATR", "OBV"],
-		"entry_conditions": [
-			["MACD"],                # вход по MACD
-			["Stochastic", "ATR"]    # или Stochastic + ATR
-		],
-		"macd_fast": 12,
-		"macd_slow": 26,
-		"macd_signal": 9,
-		"stochastic_period": 14,
-		"atr_period": 14,
-		"stop_loss": 0.04,
-		"take_profit_targets": [0.04, 0.08, 0.12],
-		"take_profit_distribution": [0.3, 0.4, 0.3],
-		"trailing_stop": True,
-		"trailing_mode": "step",
-		"allocation_percent": 0.03
-	}
-}
+# Это нужно будер реализлвать при деплоии
 
-
-
+# 6.	Безопасность (усиление)
+# o	Подключить AWS Secrets Manager или Docker secrets для хранения ключей.
+# o	Добавить проверку, чтобы ключи не попадали в логи.
+# o	При необходимости — шифровать .env.

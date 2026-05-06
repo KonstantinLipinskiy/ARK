@@ -1,31 +1,34 @@
 import ccxt.async_support as ccxt
-from app.config import EXCHANGE_CONFIG, STRATEGY_CONFIG
+from app.config import settings
 from app.utils.logger import logger
 from app.services.risk import RiskService
 from app.services.telegram import TelegramService
+from app.db.schemas import TradeORM
+from sqlalchemy import select
+import asyncio
 
 # --- INIT ---
 def get_exchange():
 	"""
 	Инициализация клиента биржи через ccxt.
 	"""
-	exchange_class = getattr(ccxt, EXCHANGE_CONFIG["name"])
+	exchange_class = getattr(ccxt, settings.EXCHANGE_CONFIG["name"])
 	exchange = exchange_class({
-		"apiKey": EXCHANGE_CONFIG["api_key"],
-		"secret": EXCHANGE_CONFIG["api_secret"],
+		"apiKey": settings.EXCHANGE_CONFIG["api_key"],
+		"secret": settings.EXCHANGE_CONFIG["api_secret"],
 		"enableRateLimit": True,
-		"test": EXCHANGE_CONFIG["mode"] == "testnet",
+		"test": settings.EXCHANGE_CONFIG["mode"] == "testnet",
 		"adjustForTimeDifference": True,
 	})
 
 	# Если режим testnet — переопределяем URL
-	if EXCHANGE_CONFIG["mode"] == "testnet" and hasattr(exchange, "urls"):
+	if settings.EXCHANGE_CONFIG["mode"] == "testnet" and hasattr(exchange, "urls"):
 		if "test" in exchange.urls:
 			exchange.urls["api"] = exchange.urls["test"]
 
-	# Устанавливаем тип торговли (spot/futures)
-	market_type = EXCHANGE_CONFIG.get("market_type", "spot")
-	if market_type == "futures":
+	# Устанавливаем тип торговли (spot/futures/testnet)
+	trading_mode = settings.TRADING_MODE
+	if trading_mode == "futures":
 		exchange.options["defaultType"] = "linear"  # USDT‑margined futures
 	else:
 		exchange.options["defaultType"] = "spot"
@@ -46,44 +49,87 @@ async def get_balance(currency: str = "USDT"):
 async def create_order(
 	symbol: str,
 	side: str,
-	amount: float,
+	amount: float = None,
 	price: float = None,
 	risk_service: RiskService = None,
-	telegram: TelegramService = None
+	telegram: TelegramService = None,
+	signal_strength: float = None,
 ):
 	try:
-		# Проверка риска
+		exchange = get_exchange()
+		trading_mode = settings.TRADING_MODE
+
+		# --- Расчёт объёма через RiskService ---
 		if risk_service:
+			await risk_service.refresh_config()
+			deposit = await get_balance("USDT")
+			strength = signal_strength if signal_strength else 1.0
+
+			stop_loss_pct = risk_service.STRATEGY_CONFIG[symbol].get("stop_loss", 0.02)
+			total_loss_pct = risk_service.RISK_CONFIG.get("default_trade_loss_pct", 0.01)
+
+			position_size = await risk_service.calculate_position_size(
+					symbol=symbol,
+					deposit=deposit,
+					entry_price=price or 1.0,
+					stop_loss_pct=stop_loss_pct,
+					strength=strength
+			)
+
 			valid = await risk_service.validate_trade(
 					symbol,
-					deposit=1000,
-					entry_price=price or 0,
-					stop_loss_pct=0.02,
+					deposit=deposit,
+					entry_price=price or 1.0,
+					stop_loss_pct=stop_loss_pct,
 					open_trades=1,
-					total_loss_pct=0.01
+					total_loss_pct=total_loss_pct,
+					strength=strength
 			)
 			if not valid:
 					if telegram:
 						await telegram.send_message(f"❌ Risk validation failed for {symbol}")
 					return {"error": "Risk validation failed"}
 
-		exchange = get_exchange()
-		market_type = EXCHANGE_CONFIG.get("market_type", "spot")
+			amount = position_size
 
-		if market_type == "spot":
+		# --- Создание ордера ---
+		if trading_mode == "spot":
 			if price:
 					order = await exchange.create_limit_order(symbol, side, amount, price)
 			else:
 					order = await exchange.create_market_order(symbol, side, amount)
 
-		elif market_type == "futures":
-			leverage = STRATEGY_CONFIG.get(symbol, {}).get("leverage", 1)
+		elif trading_mode == "futures":
+			leverage = risk_service.calculate_leverage(symbol, signal_strength or 1.0) if risk_service else 1
 			await exchange.set_leverage(leverage, symbol)
 
 			if price:
-					order = await exchange.create_limit_order(symbol, side, amount, price, params={"reduceOnly": False})
+					order = await exchange.create_limit_order(
+						symbol, side, amount, price, params={"reduceOnly": False}
+					)
 			else:
-					order = await exchange.create_market_order(symbol, side, amount, params={"reduceOnly": False})
+					order = await exchange.create_market_order(
+						symbol, side, amount, params={"reduceOnly": False}
+					)
+
+		elif trading_mode == "testnet":
+			if price:
+					order = await exchange.create_limit_order(symbol, side, amount, price)
+			else:
+					order = await exchange.create_market_order(symbol, side, amount)
+
+		# --- Сохранение сделки в БД ---
+		if risk_service:
+			trade = TradeORM(
+					symbol=symbol,
+					side=side,
+					amount=amount,
+					price=price or 0.0,
+					status="open",
+					exchange_order_id=order.get("id")  # сохраняем ID ордера с биржи
+			)
+			risk_service.db_session.add(trade)
+			await risk_service.db_session.commit()
 
 		if telegram:
 			await telegram.send_message(f"✅ Order created: {symbol} {side} {amount}")
@@ -96,10 +142,19 @@ async def create_order(
 		return {"error": str(e)}
 
 # --- CANCEL ORDER ---
-async def cancel_order(symbol: str, order_id: str, telegram: TelegramService = None):
+async def cancel_order(symbol: str, order_id: str, risk_service: RiskService = None, telegram: TelegramService = None):
 	try:
 		exchange = get_exchange()
 		result = await exchange.cancel_order(order_id, symbol)
+
+		# --- Обновление статуса сделки в БД ---
+		if risk_service:
+			stmt = select(TradeORM).where(TradeORM.exchange_order_id == order_id)
+			trade = (await risk_service.db_session.execute(stmt)).scalar_one_or_none()
+			if trade:
+					trade.status = "canceled"
+					await risk_service.db_session.commit()
+
 		if telegram:
 			await telegram.send_message(f"⚠️ Order canceled: {order_id}")
 		return result
@@ -111,9 +166,9 @@ async def cancel_order(symbol: str, order_id: str, telegram: TelegramService = N
 async def get_positions(symbol: str = None):
 	try:
 		exchange = get_exchange()
-		market_type = EXCHANGE_CONFIG.get("market_type", "spot")
+		trading_mode = settings.TRADING_MODE
 
-		if market_type == "futures":
+		if trading_mode == "futures":
 			if symbol:
 					return await exchange.fetch_positions([symbol])
 			return await exchange.fetch_positions()
@@ -133,14 +188,25 @@ async def get_open_orders(symbol: str = None):
 		return {"error": str(e)}
 
 # --- CLOSE POSITION ---
-async def close_position(symbol: str, telegram: TelegramService = None):
+async def close_position(symbol: str, risk_service: RiskService = None, telegram: TelegramService = None):
 	try:
 		exchange = get_exchange()
 		positions = await exchange.fetch_positions([symbol])
 		for pos in positions:
 			if pos["contracts"] > 0:
 					side = "sell" if pos["side"] == "long" else "buy"
-					await exchange.create_market_order(symbol, side, pos["contracts"], params={"reduceOnly": True})
+					await exchange.create_market_order(
+						symbol, side, pos["contracts"], params={"reduceOnly": True}
+					)
+
+					# --- Обновление статуса сделки в БД ---
+					if risk_service and pos.get("id"):
+						stmt = select(TradeORM).where(TradeORM.exchange_order_id == pos["id"])
+						trade = (await risk_service.db_session.execute(stmt)).scalar_one_or_none()
+						if trade:
+							trade.status = "closed"
+							await risk_service.db_session.commit()
+
 		if telegram:
 			await telegram.send_message(f"🔒 Position closed: {symbol}")
 		return {"status": "closed"}

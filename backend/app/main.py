@@ -48,7 +48,7 @@ security = HTTPBearer()
 
 async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 	try:
-		payload = jwt.decode(credentials.credentials, config.JWT_SECRET, algorithms=["HS256"])
+		payload = jwt.decode(credentials.credentials, config.settings.JWT_SECRET, algorithms=["HS256"])
 		return payload
 	except jwt.ExpiredSignatureError:
 		raise JSONResponse(status_code=401, content={"error": "Token expired"})
@@ -80,7 +80,7 @@ app.include_router(prometheus.router)
 # --- Системные эндпоинты ---
 @app.get("/")
 async def root():
-	return {"message": "ARK Bot API is running", "mode": config.EXCHANGE_CONFIG["market_type"]}
+	return {"message": "ARK Bot API is running", "mode": config.settings.TRADING_MODE}
 
 from app.broker.rabbitmq import broker
 from app.cache.redis import redis_client
@@ -99,7 +99,7 @@ async def health_check():
 		"status": status,
 		"rabbitmq": rabbitmq_ok,
 		"redis": redis_ok,
-		"market_type": config.EXCHANGE_CONFIG["market_type"]
+		"market_type": config.settings.TRADING_MODE
 	}
 
 # --- Инициализация сервисов ---
