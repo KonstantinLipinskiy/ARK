@@ -10,6 +10,13 @@ class IndicatorEnum(str, enum.Enum):
 	EMA = "EMA"
 	MACD = "MACD"
 	Bollinger = "Bollinger"
+	ATR = "ATR"
+	OBV = "OBV"
+	Stochastic = "Stochastic"
+	Volume = "Volume"
+	VWAP = "VWAP"
+	Ichimoku = "Ichimoku"
+
 
 class Signal(BaseModel):
 	id: Optional[int] = Field(None, description="ID сигнала (генерируется БД)")

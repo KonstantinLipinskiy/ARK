@@ -25,7 +25,10 @@ if os.getenv("USE_TESTNET") == "true":
 else:
 	DATABASE_URL = os.getenv("DATABASE_URL_MAINNET", os.getenv("DATABASE_URL", "sqlite:///./arkbot.db"))
 
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+from app.config import settings
+
+config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URL))
+
 
 # Логирование Alembic
 if config.config_file_name is not None:

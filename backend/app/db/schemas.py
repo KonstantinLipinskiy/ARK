@@ -67,6 +67,7 @@ class SignalORM(Base):
 
 	trades = relationship("TradeORM", back_populates="signal", cascade="all, delete-orphan")
 
+
 # --- Таблица пользователей ---
 class UserORM(Base):
 	__tablename__ = "users"
@@ -74,15 +75,24 @@ class UserORM(Base):
 	id = Column(Integer, primary_key=True, index=True)
 	username = Column(String(50), unique=True, nullable=False, index=True)
 	email = Column(String(255), unique=True, nullable=False, index=True)
-	role = Column(Enum(UserRole), default=UserRole.trader)
-	status = Column(
-		Enum(UserStatus, name="userstatus", create_type=True),
-		default=UserStatus.active,
-		index=True
-	)
-	telegram_id = Column(String(50), unique=True, index=True)
+	role = Column(Enum(UserRole), default=UserRole.trader, nullable=False)
+	status = Column(Enum(UserStatus), default=UserStatus.active, nullable=False, index=True)
+
+	# 🔹 поля для аутентификации
 	password_hash = Column(String(255), nullable=False)
+	salt = Column(String(255), nullable=False)
+
+	# 🔹 интеграция
+	telegram_id = Column(String(50), unique=True, index=True)
+
+	# 🔹 метаданные
 	created_at = Column(DateTime, server_default=func.now())
+	last_login = Column(DateTime, nullable=True)
+	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+	# 🔹 настройки пользователя
+	# settings = {"risk_profile": "conservative", "notifications_enabled": True}
+	settings = Column(JSON, default={})
 
 	# связи
 	trades = relationship("TradeORM", back_populates="user", cascade="all, delete-orphan")
@@ -97,6 +107,7 @@ class RiskLog(Base):
 	id = Column(Integer, primary_key=True, index=True)
 	reason = Column(String(255), nullable=False)              # причина нарушения
 	timestamp = Column(DateTime, server_default=func.now())   # когда произошло
+
 
 # --- Таблица отчётов бэктеста ---
 class BacktestReport(Base):
@@ -114,6 +125,7 @@ class BacktestReport(Base):
 	# связь с пользователем
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="backtest_reports")
+
 
 class StrategyORM(Base):
 	__tablename__ = "strategies"
@@ -144,6 +156,9 @@ class StrategyORM(Base):
 	# аллокация и плечо
 	allocation_percent = Column(Float, nullable=False)
 	leverage = Column(Integer, default=1)
+
+	# 🔹 новый параметр влияния силы сигнала
+	strength_multiplier = Column(Float, nullable=False, default=1.0)
 
 
 # --- Таблица настроек риск-менеджмента ---

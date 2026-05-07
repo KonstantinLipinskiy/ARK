@@ -19,7 +19,10 @@ class Settings(BaseSettings):
 	TRADING_MODE: str = os.getenv("TRADING_MODE", "spot")  # spot / futures
 	USE_TESTNET: bool = os.getenv("USE_TESTNET", "false").lower() == "true"
 
+	# 🔹 JWT настройки
 	JWT_SECRET: str = os.getenv("JWT_SECRET", "default_secret")
+	JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+	JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", 60))
 
 	# 🔹 Централизованная конфигурация биржи
 	EXCHANGE_CONFIG: ClassVar[dict] = {

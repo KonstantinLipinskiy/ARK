@@ -1,11 +1,13 @@
+# app/api/routes_signals.py
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
+from datetime import datetime
+
 from app.models.signal import Signal
-from app.db.schemas import SignalORM
 from app.db.session import get_db
+from app.db import crud
 from app.services.telegram import send_trade_notification
 from app.services.ml import MLService
 
@@ -25,26 +27,27 @@ async def get_signals(
 	limit: int = 50,
 	symbol: Optional[str] = Query(None),
 	indicator: Optional[str] = Query(None),
+	user_id: Optional[int] = Query(None),
+	trade_id: Optional[int] = Query(None),
 	db: AsyncSession = Depends(get_db)
 ):
-	query = select(SignalORM)
-	if symbol:
-		query = query.filter(SignalORM.symbol == symbol)
-	if indicator:
-		query = query.filter(SignalORM.indicator == indicator)
-
-	result = await db.execute(query.offset(skip).limit(limit))
-	signals = result.scalars().all()
-	return signals
+	try:
+		signals = await crud.get_signals(db, skip=skip, limit=limit, symbol=symbol, indicator=indicator)
+		if user_id:
+			signals = [s for s in signals if s.user_id == user_id]
+		if trade_id:
+			signals = [s for s in signals if s.id == trade_id]
+		return signals
+	except SQLAlchemyError as e:
+		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 # 🔹 Получить сигнал по ID
 @router.get("/{signal_id}", response_model=Signal)
 async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
-	result = await db.execute(select(SignalORM).filter(SignalORM.id == signal_id))
-	signal = result.scalars().first()
-	if not signal:
+	result = await crud.update_signal(db, signal_id, {})  # просто загрузка без изменений
+	if not result:
 		raise HTTPException(status_code=404, detail="Signal not found")
-	return signal
+	return result
 
 # 🔹 Добавить новый сигнал (с ML‑фильтрацией и уведомлением в Telegram)
 @router.post("/", response_model=Signal)
@@ -71,13 +74,13 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 		if prob < 0.6:
 			raise HTTPException(status_code=400, detail=f"Сигнал отфильтрован как слабый (prob={prob:.2f})")
 	else:
-		prob = None  # если модель не загружена, сохраняем без фильтрации
+		prob = None
 
-	new_signal = SignalORM(**signal.dict(), probability=prob)
-	db.add(new_signal)
 	try:
-		await db.commit()
-		await db.refresh(new_signal)
+		new_signal = await crud.create_signal(db, signal)
+		# добавляем вероятность в объект
+		if prob is not None:
+			new_signal.confidence = prob
 		# Отправляем уведомление в Telegram
 		msg = f"📈 Новый сигнал: {new_signal.symbol} {new_signal.direction} ({new_signal.indicator})"
 		if prob is not None:
@@ -85,40 +88,20 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 		await send_trade_notification(msg)
 		return new_signal
 	except SQLAlchemyError as e:
-		await db.rollback()
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 # 🔹 Обновить сигнал
 @router.put("/{signal_id}", response_model=Signal)
 async def update_signal(signal_id: int, updated: Signal, db: AsyncSession = Depends(get_db)):
-	result = await db.execute(select(SignalORM).filter(SignalORM.id == signal_id))
-	signal = result.scalars().first()
+	signal = await crud.update_signal(db, signal_id, updated.dict())
 	if not signal:
 		raise HTTPException(status_code=404, detail="Signal not found")
-
-	for key, value in updated.dict().items():
-		setattr(signal, key, value)
-
-	try:
-		await db.commit()
-		await db.refresh(signal)
-		return signal
-	except SQLAlchemyError as e:
-		await db.rollback()
-		raise HTTPException(status_code=500, detail=f"Database error: {e}")
+	return signal
 
 # 🔹 Удалить сигнал
 @router.delete("/{signal_id}")
 async def delete_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
-	result = await db.execute(select(SignalORM).filter(SignalORM.id == signal_id))
-	signal = result.scalars().first()
-	if not signal:
+	deleted = await crud.delete_signal(db, signal_id)
+	if not deleted:
 		raise HTTPException(status_code=404, detail="Signal not found")
-
-	await db.delete(signal)
-	try:
-		await db.commit()
-		return {"detail": "Signal deleted"}
-	except SQLAlchemyError as e:
-		await db.rollback()
-		raise HTTPException(status_code=500, detail=f"Database error: {e}")
+	return {"detail": "Signal deleted"}

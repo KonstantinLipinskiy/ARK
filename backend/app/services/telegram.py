@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 # Импортируем наш общий логгер
 from app.utils.logger import logger
-from app.db.schemas import TradeORM, SignalORM
+from app.db.schemas import TradeORM, SignalORM, UserORM
 from app.services.rabbitmq import RabbitMQBroker
 from app.utils.metrics import calculate_metrics
 from app.config import Settings
@@ -29,7 +29,19 @@ class TelegramService:
 		logger.info(f"Отправка сообщения в Telegram: {text}")
 		await self.bot.send_message(chat_id=self.chat_id, text=text)
 
-	async def send_trade_notification(self, trade: dict):
+	async def send_trade_notification(self, trade: dict, user_id: int | None = None):
+		"""
+		Отправка уведомления о сделке.
+		Проверяем настройки пользователя: notifications_enabled.
+		"""
+		if user_id:
+			async with get_session() as session:
+					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+					user = result.scalars().first()
+					if user and user.settings and not user.settings.get("notifications_enabled", True):
+						logger.info(f"🔕 Уведомления отключены для пользователя {user.username}")
+						return  # не отправляем уведомление
+
 		msg = (
 			f"📊 Сделка по {trade.get('pair', 'N/A')}\n"
 			f"Статус: {trade['status']}\n"
@@ -40,7 +52,19 @@ class TelegramService:
 		)
 		await self.send_message(msg)
 
-	async def send_error(self, error: str):
+	async def send_error(self, error: str, user_id: int | None = None):
+		"""
+		Отправка ошибки.
+		Проверяем notifications_enabled.
+		"""
+		if user_id:
+			async with get_session() as session:
+					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+					user = result.scalars().first()
+					if user and user.settings and not user.settings.get("notifications_enabled", True):
+						logger.info(f"🔕 Ошибки не отправляются — уведомления отключены для пользователя {user.username}")
+						return
+
 		msg = f"❌ Ошибка: {error}"
 		await self.send_message(msg)
 
@@ -195,7 +219,7 @@ async def signal_command(message: types.Message):
 		result = await session.execute(select(SignalORM).order_by(SignalORM.timestamp.desc()).limit(5))
 		signals = result.scalars().all()
 		if signals:
-			msg = "\n".join([f"{s.symbol} {s.action} @ {s.price}" for s in signals])
+			msg = "\n".join([f"{s.symbol} {s.indicator} {s.direction} (strength={s.strength})" for s in signals])
 			await message.answer(f"📡 Последние сигналы:\n{msg}")
 		else:
 			await message.answer("Сигналы отсутствуют.")
