@@ -1,5 +1,5 @@
+# app/cache/redis.py
 import json
-import logging
 from redis.asyncio import Redis
 from app.utils.logger import logger
 from app.config import REDIS_CONFIG
@@ -12,11 +12,11 @@ class RedisCache:
 					db: int = REDIS_CONFIG["db"]):
 		self.client = Redis(host=host, port=port, db=db, decode_responses=True)
 
-
 	async def set(self, key: str, value: dict, expire: int = 60):
 		"""Сохраняет данные в Redis с TTL."""
 		try:
 			await self.client.set(key, json.dumps(value), ex=expire)
+			logger.debug(f"✅ Redis set: {key} → {value}")
 		except Exception as e:
 			logger.error(f"❌ Redis set error: {e}")
 
@@ -24,7 +24,10 @@ class RedisCache:
 		"""Получает данные из Redis."""
 		try:
 			data = await self.client.get(key)
-			return json.loads(data) if data else None
+			if data:
+					logger.debug(f"✅ Redis get: {key}")
+					return json.loads(data)
+			return None
 		except Exception as e:
 			logger.error(f"❌ Redis get error: {e}")
 			return None
@@ -33,6 +36,7 @@ class RedisCache:
 		"""Удаляет ключ из Redis."""
 		try:
 			await self.client.delete(key)
+			logger.debug(f"🗑️ Redis delete: {key}")
 		except Exception as e:
 			logger.error(f"❌ Redis delete error: {e}")
 
@@ -40,6 +44,7 @@ class RedisCache:
 		"""Публикует сообщение в канал Redis (pub/sub)."""
 		try:
 			await self.client.publish(channel, json.dumps(message))
+			logger.debug(f"📤 Redis publish to {channel}: {message}")
 		except Exception as e:
 			logger.error(f"❌ Redis publish error: {e}")
 
@@ -48,6 +53,7 @@ class RedisCache:
 		try:
 			pubsub = self.client.pubsub()
 			await pubsub.subscribe(channel)
+			logger.info(f"📥 Redis subscribed to channel: {channel}")
 			return pubsub
 		except Exception as e:
 			logger.error(f"❌ Redis subscribe error: {e}")
@@ -55,8 +61,38 @@ class RedisCache:
 
 	async def exists(self, key: str) -> bool:
 		"""Проверка наличия ключа."""
-		return await self.client.exists(key) > 0
+		try:
+			result = await self.client.exists(key)
+			logger.debug(f"🔎 Redis exists: {key} → {result > 0}")
+			return result > 0
+		except Exception as e:
+			logger.error(f"❌ Redis exists error: {e}")
+			return False
 
 	async def flush(self):
 		"""Очистка базы (например, при тестах)."""
-		await self.client.flushdb()
+		try:
+			await self.client.flushdb()
+			logger.warning("⚠️ Redis flush: database cleared")
+		except Exception as e:
+			logger.error(f"❌ Redis flush error: {e}")
+
+	async def keys(self, pattern: str = "*") -> list[str]:
+		"""Получение списка ключей по шаблону."""
+		try:
+			result = await self.client.keys(pattern)
+			logger.debug(f"🔑 Redis keys: {result}")
+			return result
+		except Exception as e:
+			logger.error(f"❌ Redis keys error: {e}")
+			return []
+
+	async def health_check(self) -> bool:
+		"""Проверка доступности Redis."""
+		try:
+			pong = await self.client.ping()
+			logger.debug("✅ Redis health check: PONG")
+			return pong
+		except Exception as e:
+			logger.error(f"❌ Redis health check failed: {e}")
+			return False

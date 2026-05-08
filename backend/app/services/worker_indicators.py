@@ -1,3 +1,4 @@
+# app/workers/worker_indicators.py
 import asyncio
 import json
 from app.services.indicators_service import IndicatorsService
@@ -25,6 +26,10 @@ class IndicatorWorker:
 			indicator = message.get("indicator")
 			kwargs = message.get("kwargs", {})
 
+			if not pair or not indicator:
+					logger.error(f"❌ Invalid message: {message}")
+					return
+
 			async with async_session() as session:
 					redis = RedisCache()
 					service = IndicatorsService(session, redis)
@@ -39,6 +44,7 @@ class IndicatorWorker:
 		"""
 		Запуск воркера: слушает очередь RabbitMQ и обрабатывает задачи.
 		"""
+		logger.info(f"🚀 IndicatorWorker started, listening on queue: {self.queue_name}")
 		await self.broker.consume(
 			queue_name=self.queue_name,
 			callback=lambda msg: asyncio.create_task(self.process_message(json.loads(msg)))
@@ -46,5 +52,9 @@ class IndicatorWorker:
 
 if __name__ == "__main__":
 	worker = IndicatorWorker()
-	asyncio.run(worker.start())
-
+	try:
+		asyncio.run(worker.start())
+	except KeyboardInterrupt:
+		logger.info("🛑 IndicatorWorker stopped manually")
+	except Exception as e:
+		logger.error(f"❌ Fatal error in IndicatorWorker: {e}")

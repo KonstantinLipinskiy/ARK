@@ -1,8 +1,9 @@
+# app/services/indicators_service.py
 import asyncio
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.indicator_factory import IndicatorFactory
-from app.db.models import Indicator  # модель таблицы indicators
+from app.db.schemas import IndicatorORM  # ORM таблица indicators
 from app.utils.logger import logger
 from app.cache.redis import RedisCache
 
@@ -36,6 +37,7 @@ class IndicatorsService:
 			# Публикация в Redis (для воркеров/уведомлений)
 			await self._publish_to_redis(pair, indicator_name, result)
 
+			logger.info(f"✅ Indicator {indicator_name} успешно рассчитан и сохранён")
 			return result
 
 		except Exception as e:
@@ -47,16 +49,30 @@ class IndicatorsService:
 		Сохраняет рассчитанный индикатор в таблицу indicators.
 		"""
 		try:
-			# Пример: сохраняем последнее значение индикатора
-			value = result.iloc[-1] if isinstance(result, pd.Series) else str(result)
-
-			indicator = Indicator(
-					pair=pair,
-					name=indicator_name,
-					value=str(value)
-			)
-			self.db_session.add(indicator)
-			await self.db_session.commit()
+			# Если результат — кортеж (например, MACD), сохраняем все значения
+			if isinstance(result, tuple):
+					values = []
+					for idx, res in enumerate(result):
+						val = res.iloc[-1] if isinstance(res, pd.Series) else str(res)
+						indicator = IndicatorORM(
+							pair=pair,
+							name=f"{indicator_name}_{idx}",
+							value=str(val)
+						)
+						self.db_session.add(indicator)
+						values.append(val)
+					await self.db_session.commit()
+					logger.info(f"✅ DB save: {indicator_name} → {values}")
+			else:
+					value = result.iloc[-1] if isinstance(result, pd.Series) else str(result)
+					indicator = IndicatorORM(
+						pair=pair,
+						name=indicator_name,
+						value=str(value)
+					)
+					self.db_session.add(indicator)
+					await self.db_session.commit()
+					logger.info(f"✅ DB save: {indicator_name} → {value}")
 		except Exception as e:
 			logger.error(f"❌ DB save error: {e}")
 			await self.db_session.rollback()
@@ -66,16 +82,27 @@ class IndicatorsService:
 		Публикует результат в Redis канал indicators.
 		"""
 		try:
-			payload = {
-					"pair": pair,
-					"indicator": indicator_name,
-					"result": (
-						result.tail(1).to_dict()
-						if isinstance(result, pd.Series)
-						else str(result)
-					)
-			}
+			if isinstance(result, tuple):
+					payload = {
+						"pair": pair,
+						"indicator": indicator_name,
+						"result": [
+							res.tail(1).to_dict() if isinstance(res, pd.Series) else str(res)
+							for res in result
+						]
+					}
+			else:
+					payload = {
+						"pair": pair,
+						"indicator": indicator_name,
+						"result": (
+							result.tail(1).to_dict()
+							if isinstance(result, pd.Series)
+							else str(result)
+						)
+					}
 			await self.redis.publish("indicators", payload)
+			logger.info(f"✅ Redis publish: {indicator_name} → {payload}")
 		except Exception as e:
 			logger.error(f"❌ Redis publish error: {e}")
 

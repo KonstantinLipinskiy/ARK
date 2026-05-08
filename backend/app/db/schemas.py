@@ -1,3 +1,4 @@
+# app/db/schemas.py
 from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, JSON
 from sqlalchemy.orm import relationship
 import enum
@@ -91,7 +92,6 @@ class UserORM(Base):
 	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 	# 🔹 настройки пользователя
-	# settings = {"risk_profile": "conservative", "notifications_enabled": True}
 	settings = Column(JSON, default={})
 
 	# связи
@@ -127,6 +127,7 @@ class BacktestReport(Base):
 	user = relationship("UserORM", back_populates="backtest_reports")
 
 
+# --- Таблица стратегий ---
 class StrategyORM(Base):
 	__tablename__ = "strategies"
 
@@ -168,15 +169,26 @@ class RiskSettingsORM(Base):
 	id = Column(Integer, primary_key=True, index=True)
 
 	# 🔹 Основные лимиты
-	max_risk_per_trade = Column(Float, nullable=False, default=0.01)   # макс. риск на сделку (% депозита)
-	max_open_trades = Column(Integer, nullable=False, default=5)       # макс. число открытых сделок
-	max_daily_loss = Column(Float, nullable=False, default=0.05)       # макс. дневной убыток (% депозита)
-	max_leverage = Column(Integer, nullable=False, default=3)          # макс. плечо
+	max_risk_per_trade = Column(Float, nullable=False, default=0.01)
+	max_open_trades = Column(Integer, nullable=False, default=5)
+	max_daily_loss = Column(Float, nullable=False, default=0.05)
+	max_leverage = Column(Integer, nullable=False, default=3)
 
 	# 🔹 Дополнительные параметры
-	cooldown_between_trades = Column(Integer, nullable=False, default=60)  # задержка между сделками (сек)
-	risk_reward_ratio = Column(Float, nullable=False, default=1.5)         # соотношение риск/прибыль
-	dynamic_allocation = Column(Boolean, nullable=False, default=False)    # включена ли динамическая аллокация
+	cooldown_between_trades = Column(Integer, nullable=False, default=60)
+	risk_reward_ratio = Column(Float, nullable=False, default=1.5)
+	dynamic_allocation = Column(Boolean, nullable=False, default=False)
 
 	# 🔹 Метаданные
 	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# --- Таблица индикаторов ---
+class IndicatorORM(Base):
+	__tablename__ = "indicators"
+
+	id = Column(Integer, primary_key=True, index=True)
+	pair = Column(String(20), nullable=False, index=True)       # например BTC/USDT
+	name = Column(String(50), nullable=False, index=True)       # EMA, RSI, MACD
+	value = Column(String(255), nullable=False)                 # последнее рассчитанное значение
+	timestamp = Column(DateTime, server_default=func.now(), index=True)

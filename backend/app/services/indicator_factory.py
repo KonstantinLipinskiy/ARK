@@ -1,3 +1,4 @@
+# app/services/indicator_factory.py
 import pandas as pd
 from app.services import indicators
 from app.utils.logger import logger
@@ -23,6 +24,17 @@ class IndicatorFactory:
 	}
 
 	@classmethod
+	def register(cls, name: str, func):
+		"""
+		Добавление нового индикатора в фабрику.
+		Пример: IndicatorFactory.register("Custom", custom_func)
+		"""
+		if name in cls._registry:
+			logger.warning(f"⚠️ Indicator {name} уже существует и будет перезаписан")
+		cls._registry[name] = func
+		logger.info(f"✅ Indicator {name} зарегистрирован")
+
+	@classmethod
 	def calculate(cls, name: str, **kwargs):
 		"""
 		Унифицированный вызов индикатора.
@@ -37,7 +49,9 @@ class IndicatorFactory:
 		cls._validate_inputs(kwargs)
 
 		try:
-			return func(**kwargs)
+			result = func(**kwargs)
+			logger.info(f"✅ Indicator {name} успешно рассчитан")
+			return result
 		except Exception as e:
 			logger.error(f"❌ Error calculating {name}: {e}")
 			raise RuntimeError(f"❌ Error calculating {name}: {e}")

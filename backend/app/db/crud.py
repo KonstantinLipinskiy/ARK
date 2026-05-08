@@ -260,7 +260,6 @@ async def update_user(db: AsyncSession, user_id: int, updates: dict):
 		logger.error(f"Ошибка обновления пользователя: {e}")
 		raise
 
-
 async def delete_user(db: AsyncSession, user_id: int):
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.id == user_id))
 	db_user = result.scalars().first()
@@ -273,6 +272,43 @@ async def delete_user(db: AsyncSession, user_id: int):
 	except SQLAlchemyError as e:
 		await db.rollback()
 		logger.error(f"Ошибка удаления пользователя: {e}")
+		raise
+
+# ---------- Indicators ----------
+async def save_indicator(db: AsyncSession, pair: str, name: str, value: str) -> schemas.IndicatorORM:
+	"""Сохраняет рассчитанный индикатор в таблицу indicators."""
+	try:
+		indicator = schemas.IndicatorORM(pair=pair, name=name, value=value)
+		db.add(indicator)
+		await db.commit()
+		await db.refresh(indicator)
+		return indicator
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка сохранения индикатора: {e}")
+		raise
+
+async def get_indicators(db: AsyncSession, pair: str = None, name: str = None, skip: int = 0, limit: int = 100):
+	query = select(schemas.IndicatorORM)
+	if pair:
+		query = query.filter(schemas.IndicatorORM.pair == pair)
+	if name:
+		query = query.filter(schemas.IndicatorORM.name == name)
+	result = await db.execute(query.offset(skip).limit(limit))
+	return result.scalars().all()
+
+async def delete_indicator(db: AsyncSession, indicator_id: int):
+	result = await db.execute(select(schemas.IndicatorORM).filter(schemas.IndicatorORM.id == indicator_id))
+	db_indicator = result.scalars().first()
+	if not db_indicator:
+		return None
+	await db.delete(db_indicator)
+	try:
+		await db.commit()
+		return True
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка удаления индикатора: {e}")
 		raise
 
 # ---------- Analytics ----------
