@@ -31,6 +31,10 @@ async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
 			exit_price=trade.exit_price,
 			profit_loss=trade.profit_loss,
 			leverage=leverage,
+			stop_loss=getattr(trade, "stop_loss", None),
+			take_profit=getattr(trade, "take_profit", None),
+			confidence_score=getattr(trade, "confidence_score", None),
+			risk_reason=getattr(trade, "risk_reason", None),
 			exchange_order_id=getattr(trade, "exchange_order_id", None)
 		)
 		db.add(db_trade)
@@ -76,9 +80,12 @@ async def update_trade(db: AsyncSession, trade_id: int, updates: dict):
 	if not db_trade:
 		return None
 
-	allowed_fields = {"symbol", "side", "amount", "price", "status",
-							"entry_price", "exit_price", "profit_loss", "leverage",
-							"signal_id", "user_id", "exchange_order_id"}
+	allowed_fields = {
+		"symbol", "side", "amount", "price", "status",
+		"entry_price", "exit_price", "profit_loss", "leverage",
+		"signal_id", "user_id", "exchange_order_id",
+		"stop_loss", "take_profit", "confidence_score", "risk_reason"
+	}
 	for key, value in updates.items():
 		if key in allowed_fields:
 			setattr(db_trade, key, value)
@@ -108,6 +115,42 @@ async def delete_trade(db: AsyncSession, trade_id: int):
 	except SQLAlchemyError as e:
 		await db.rollback()
 		logger.error(f"Ошибка удаления сделки: {e}")
+		raise
+
+async def close_trade(db: AsyncSession, trade_id: int, exit_price: float):
+	"""Закрыть сделку и рассчитать PnL."""
+	result = await db.execute(select(schemas.TradeORM).filter(schemas.TradeORM.id == trade_id))
+	db_trade = result.scalars().first()
+	if not db_trade:
+		return None
+	db_trade.exit_price = exit_price
+	db_trade.status = schemas.TradeStatus.closed
+	if db_trade.entry_price and db_trade.exit_price:
+		db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
+	try:
+		await db.commit()
+		await db.refresh(db_trade)
+		return db_trade
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка закрытия сделки: {e}")
+		raise
+
+async def cancel_trade(db: AsyncSession, trade_id: int, reason: str = "Cancelled manually"):
+	"""Отменить сделку с указанием причины."""
+	result = await db.execute(select(schemas.TradeORM).filter(schemas.TradeORM.id == trade_id))
+	db_trade = result.scalars().first()
+	if not db_trade:
+		return None
+	db_trade.status = schemas.TradeStatus.cancelled
+	db_trade.risk_reason = reason
+	try:
+		await db.commit()
+		await db.refresh(db_trade)
+		return db_trade
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка отмены сделки: {e}")
 		raise
 
 # ---------- Signals ----------

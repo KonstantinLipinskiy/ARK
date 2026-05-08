@@ -35,6 +35,10 @@ class TradeORM(Base):
 	exit_price = Column(Float)                  # цена выхода
 	profit_loss = Column(Float)                 # PnL
 	leverage = Column(Float, default=1.0)       # плечо
+	stop_loss = Column(Float)                   # стоп-лосс %
+	take_profit = Column(Float)                 # тейк-профит %
+	confidence_score = Column(Float)            # доверие ML модели
+	risk_reason = Column(String(255))           # причина отказа при валидации риска
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	status = Column(Enum(TradeStatus), default=TradeStatus.open)
 
@@ -106,6 +110,9 @@ class RiskLog(Base):
 
 	id = Column(Integer, primary_key=True, index=True)
 	reason = Column(String(255), nullable=False)              # причина нарушения
+	symbol = Column(String(20), nullable=True)                # символ сделки
+	position_size = Column(Float, nullable=True)              # размер позиции
+	deposit = Column(Float, nullable=True)                    # депозит
 	timestamp = Column(DateTime, server_default=func.now())   # когда произошло
 
 
@@ -192,3 +199,4 @@ class IndicatorORM(Base):
 	name = Column(String(50), nullable=False, index=True)       # EMA, RSI, MACD
 	value = Column(String(255), nullable=False)                 # последнее рассчитанное значение
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
+
