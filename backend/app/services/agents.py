@@ -83,9 +83,21 @@ class AgentsService:
 		metrics = calculate_metrics(trades)
 		return f"Winrate: {metrics['winrate']:.2%}, Profit: {metrics['total_profit']:.2f}"
 
-	def search_vector(self, query: str) -> str:
-		results = self.vector.search(query)
-		return f"Vector search results: {results}"
+	def search_vector(self, query: dict) -> str:
+		"""
+		Поиск по эмбеддингам.
+		query = {"vector": [...], "collection": "signals", "top_k": 5}
+		"""
+		try:
+			collection = query.get("collection", "signals")
+			self.vector.use_collection(collection)
+			vector = query.get("vector")
+			top_k = query.get("top_k", 5)
+			results = self.vector.search(vector, top_k)
+			return f"Vector search in {collection}: {results}"
+		except Exception as e:
+			logger.error(f"Ошибка поиска векторной базы: {e}")
+			return "Ошибка поиска"
 
 	def run_agent(self, query: str) -> str:
 		logger.info(f"Запуск агента с запросом: {query}")

@@ -1,3 +1,4 @@
+# app/services/reports.py
 import time
 from typing import List, Dict, Optional
 from langchain.chains import RetrievalQA
@@ -6,6 +7,11 @@ from app.db.vector import VectorDB
 from app.utils.metrics import calculate_metrics
 from app.services.ml import MLService
 from app.utils.logger import logger
+from prometheus_client import Counter, Gauge
+
+# 🔹 Метрики Prometheus
+REPORT_REQUESTS_TOTAL = Counter("report_requests_total", "Total RAG report requests")
+REPORT_AVG_RESPONSE_TIME = Gauge("report_avg_response_time", "Average response time for RAG reports")
 
 class ReportsService:
 	def __init__(self, collection_name: str = "trades"):
@@ -25,12 +31,19 @@ class ReportsService:
 		self.requests_count = 0
 		self.total_time = 0.0
 
+	def use_collection(self, name: str):
+		"""Переключение коллекции для отчётов."""
+		self.vector_db.use_collection(name)
+
 	def generate_report(self, query: str) -> str:
 		"""Генерация текстового отчёта на основе запроса и данных из Qdrant."""
 		self.requests_count += 1
+		REPORT_REQUESTS_TOTAL.inc()
 		start = time.time()
 		result = self.qa_chain.run(query)
-		self.total_time += (time.time() - start)
+		duration = time.time() - start
+		self.total_time += duration
+		REPORT_AVG_RESPONSE_TIME.set(self.total_time / self.requests_count)
 		return result
 
 	def generate_rag_report(
@@ -41,6 +54,7 @@ class ReportsService:
 	) -> str:
 		"""Комплексный RAG-отчёт с метриками и ML прогнозами."""
 		self.requests_count += 1
+		REPORT_REQUESTS_TOTAL.inc()
 		start = time.time()
 
 		# Метрики
@@ -62,6 +76,17 @@ class ReportsService:
 		except Exception as e:
 			logger.error(f"Ошибка ML прогноза: {e}")
 
+		# 🔹 Поиск документов в Qdrant с фильтрацией
+		search_results = []
+		try:
+			query_vector = [0.0] * 768  # пример пустого запроса
+			if filters:
+					search_results = self.vector_db.search_with_filter(query_vector, filters, limit)
+			else:
+					search_results = self.vector_db.search(query_vector, limit)
+		except Exception as e:
+			logger.error(f"Ошибка поиска документов для отчёта: {e}")
+
 		report = (
 			f"📊 RAG Отчёт\n"
 			f"Всего сделок: {metrics['trades_count']}\n"
@@ -73,10 +98,13 @@ class ReportsService:
 			f"Profit Factor: {metrics['profit_factor']:.2f}\n"
 			f"Макс. серия побед: {metrics['max_consecutive_wins']}\n"
 			f"Макс. серия поражений: {metrics['max_consecutive_losses']}\n"
-			f"{ml_summary}"
+			f"{ml_summary}\n"
+			f"🔎 Найдено документов: {len(search_results)}"
 		)
 
-		self.total_time += (time.time() - start)
+		duration = time.time() - start
+		self.total_time += duration
+		REPORT_AVG_RESPONSE_TIME.set(self.total_time / self.requests_count)
 		return report
 
 	def add_document(self, vector: list[float], payload: dict):

@@ -1,3 +1,4 @@
+# app/services/ml.py
 import pandas as pd
 import joblib
 from sklearn.model_selection import train_test_split
@@ -7,10 +8,14 @@ import torch.nn as nn
 import torch.optim as optim
 from tensorflow import keras
 from transformers import pipeline
+from app.db.vector import VectorDB
+from app.utils.logger import logger
 
 class MLService:
 	def __init__(self):
 		self.model = None
+		# 🔹 Инициализация VectorDB
+		self.vector_db = VectorDB()
 
 	def prepare_data(self, trades: list[dict]) -> pd.DataFrame:
 		"""Преобразует список сделок в DataFrame для обучения и добавляет derived features."""
@@ -83,7 +88,16 @@ class MLService:
 	def analyze_news(self, text: str) -> dict:
 		"""Пример использования HuggingFace для анализа новостей."""
 		sentiment = pipeline("sentiment-analysis")
-		return sentiment(text)[0]
+		result = sentiment(text)[0]
+		# 🔹 Сохраняем эмбеддинг новости в Qdrant
+		try:
+			self.vector_db.use_collection("news")
+			vector = [float(hash(text) % 1000) / 1000.0] * 768  # пример генерации вектора
+			payload = {"id": hash(text), "text": text, "label": result["label"], "score": result["score"]}
+			self.vector_db.insert_vector(vector, payload)
+		except Exception as e:
+			logger.error(f"Ошибка сохранения эмбеддинга новости: {e}")
+		return result
 
 	# === Сохранение/загрузка моделей ===
 	def save_model(self, path: str):
@@ -115,3 +129,15 @@ class MLService:
 			self.model = keras.models.load_model(path)
 		else:
 			raise ValueError("Неизвестный тип модели")
+
+	# === Интеграция с Qdrant ===
+	def save_signal_embedding(self, features: dict, signal_id: int):
+		"""Сохраняет эмбеддинг торгового сигнала в Qdrant."""
+		try:
+			self.vector_db.use_collection("signals")
+			vector = [float(v) for v in features.values()] * (768 // len(features))  # простая генерация вектора
+			payload = {"id": signal_id, "features": features}
+			self.vector_db.insert_vector(vector, payload)
+			logger.info(f"Эмбеддинг сигнала сохранён: {payload}")
+		except Exception as e:
+			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}")

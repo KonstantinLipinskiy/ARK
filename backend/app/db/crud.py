@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy import func
 from app.db import schemas
 from app.models.trade import Trade
 from app.models.signal import Signal
@@ -273,3 +274,40 @@ async def delete_user(db: AsyncSession, user_id: int):
 		await db.rollback()
 		logger.error(f"Ошибка удаления пользователя: {e}")
 		raise
+
+# ---------- Analytics ----------
+async def get_user_winrate(db: AsyncSession, user_id: int) -> float:
+	"""Подсчёт винрейта пользователя (закрытые сделки с профитом / все закрытые сделки)."""
+	result = await db.execute(
+		select(schemas.TradeORM).filter(
+			schemas.TradeORM.user_id == user_id,
+			schemas.TradeORM.status == schemas.TradeStatus.closed
+		)
+	)
+	trades = result.scalars().all()
+	if not trades:
+		return 0.0
+	wins = sum(1 for t in trades if t.profit_loss and t.profit_loss > 0)
+	return wins / len(trades)
+
+async def get_average_profit(db: AsyncSession, user_id: int) -> float:
+	"""Средний профит пользователя по закрытым сделкам."""
+	result = await db.execute(
+		select(schemas.TradeORM.profit_loss).filter(
+			schemas.TradeORM.user_id == user_id,
+			schemas.TradeORM.status == schemas.TradeStatus.closed
+		)
+	)
+	profits = [p for p in result.scalars().all() if p is not None]
+	if not profits:
+		return 0.0
+	return sum(profits) / len(profits)
+
+async def count_signals_by_indicator(db: AsyncSession, indicator: str) -> int:
+	"""Количество сигналов по конкретному индикатору."""
+	result = await db.execute(
+		select(func.count()).select_from(schemas.SignalORM).filter(
+			schemas.SignalORM.indicator == indicator
+		)
+	)
+	return result.scalar() or 0

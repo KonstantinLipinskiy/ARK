@@ -1,44 +1,40 @@
+from logging.config import fileConfig
 import os
 import sys
-from logging.config import fileConfig
-from sqlalchemy import pool
-from sqlalchemy import engine_from_config
+from dotenv import load_dotenv
+
+from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-# Подключаем проект
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+# Добавляем корень проекта (backend) в sys.path,
+# чтобы Alembic видел пакет app
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-# Импортируем Base и все ORM‑модели
+# Импортируем базу и модели
 from app.db.base import Base
-from app.db import schemas
+from app.db import schemas  # если у тебя все модели собираются здесь
 
-# Загружаем конфиг Alembic
-config = context.config
-
-# Читаем DATABASE_URL из .env
-from dotenv import load_dotenv
+# Загружаем переменные окружения
 load_dotenv()
 
-# --- Разделение окружений ---
-if os.getenv("USE_TESTNET") == "true":
-	DATABASE_URL = os.getenv("DATABASE_URL_TESTNET")
-else:
-	DATABASE_URL = os.getenv("DATABASE_URL_MAINNET", os.getenv("DATABASE_URL", "sqlite:///./arkbot.db"))
+# Alembic Config object
+config = context.config
 
-from app.config import settings
+# Устанавливаем URL подключения из .env
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL:
+	config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
-config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URL))
-
-
-# Логирование Alembic
+# Настройка логирования
 if config.config_file_name is not None:
 	fileConfig(config.config_file_name)
 
-# Метаданные моделей (нужны Alembic для автогенерации миграций)
+# Метаданные моделей для автогенерации
 target_metadata = Base.metadata
 
-def run_migrations_offline():
-	"""Запуск миграций в оффлайн-режиме (без подключения к БД)."""
+
+def run_migrations_offline() -> None:
+	"""Run migrations in 'offline' mode."""
 	url = config.get_main_option("sqlalchemy.url")
 	context.configure(
 		url=url,
@@ -46,26 +42,26 @@ def run_migrations_offline():
 		literal_binds=True,
 		dialect_opts={"paramstyle": "named"},
 	)
+
 	with context.begin_transaction():
 		context.run_migrations()
 
-def run_migrations_online():
-	"""Запуск миграций в онлайн-режиме (с подключением к БД)."""
-	try:
-		connectable = engine_from_config(
-			config.get_section(config.config_ini_section),
-			prefix="sqlalchemy.",
-			poolclass=pool.NullPool,
-		)
-	except Exception as e:
-		raise RuntimeError(f"Ошибка подключения к БД: {e}")
+
+def run_migrations_online() -> None:
+	"""Run migrations in 'online' mode."""
+	connectable = engine_from_config(
+		config.get_section(config.config_ini_section, {}),
+		prefix="sqlalchemy.",
+		poolclass=pool.NullPool,
+	)
 
 	with connectable.connect() as connection:
 		context.configure(connection=connection, target_metadata=target_metadata)
+
 		with context.begin_transaction():
 			context.run_migrations()
 
-# Определяем режим запуска
+
 if context.is_offline_mode():
 	run_migrations_offline()
 else:

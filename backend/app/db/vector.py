@@ -1,7 +1,12 @@
+# app/db/vector.py
 import os
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from app.utils.logger import logger
+from prometheus_client import Gauge
+
+# 🔹 Метрика для Prometheus
+VECTOR_POINTS_TOTAL = Gauge("vector_points_total", "Total points in Qdrant collection", ["collection"])
 
 class VectorDB:
 	def __init__(
@@ -17,6 +22,12 @@ class VectorDB:
 		except Exception as e:
 			logger.error(f"Ошибка подключения к Qdrant: {e}")
 			raise
+
+	def use_collection(self, name: str):
+		"""Переключение на другую коллекцию (signals, trades, news, reports, strategies)."""
+		self.collection_name = name
+		self._init_collection()
+		logger.info(f"Переключено на коллекцию: {self.collection_name}")
 
 	def _init_collection(self):
 		"""Создаёт коллекцию, если она не существует."""
@@ -37,6 +48,7 @@ class VectorDB:
 					points=[models.PointStruct(id=payload.get("id"), vector=vector, payload=payload)]
 			)
 			logger.info(f"Эмбеддинг вставлен: {payload}")
+			VECTOR_POINTS_TOTAL.labels(collection=self.collection_name).set(self.count_points())
 		except Exception as e:
 			logger.error(f"Ошибка вставки эмбеддинга: {e}")
 
@@ -49,6 +61,7 @@ class VectorDB:
 			]
 			self.client.upsert(collection_name=self.collection_name, points=points)
 			logger.info(f"Batch insert: {len(points)} эмбеддингов")
+			VECTOR_POINTS_TOTAL.labels(collection=self.collection_name).set(self.count_points())
 		except Exception as e:
 			logger.error(f"Ошибка batch insert: {e}")
 
@@ -110,5 +123,6 @@ class VectorDB:
 					points_selector=models.PointIdsSelector(point_ids=[point_id])
 			)
 			logger.info(f"Эмбеддинг удалён: id={point_id}")
+			VECTOR_POINTS_TOTAL.labels(collection=self.collection_name).set(self.count_points())
 		except Exception as e:
 			logger.error(f"Ошибка удаления эмбеддинга: {e}")

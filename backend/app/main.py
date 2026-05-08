@@ -69,6 +69,18 @@ async def log_requests(request: Request, call_next):
 	logger.info(f"Ответ: {response.status_code} за {duration:.4f} сек")
 	return response
 
+# --- Централизованное SQL-логирование ---
+from sqlalchemy import event
+from app.db.session import engine_mainnet, engine_testnet
+
+@event.listens_for(engine_mainnet.sync_engine, "before_cursor_execute")
+def before_cursor_execute_mainnet(conn, cursor, statement, parameters, context, executemany):
+	logger.info(f"[MAINNET SQL] {statement} | params: {parameters}")
+
+@event.listens_for(engine_testnet.sync_engine, "before_cursor_execute")
+def before_cursor_execute_testnet(conn, cursor, statement, parameters, context, executemany):
+	logger.info(f"[TESTNET SQL] {statement} | params: {parameters}")
+
 # --- Подключаем роуты ---
 app.include_router(routes_signals.router, prefix="/api/v1/signals", tags=["Signals"])
 app.include_router(routes_trades.router, prefix="/api/v1/trades", tags=["Trades"])
