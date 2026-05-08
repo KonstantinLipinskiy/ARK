@@ -44,6 +44,26 @@ class MLService:
 		X = pd.DataFrame([features])
 		return self.model.predict_proba(X)[0][1]
 
+	def predict_with_confidence(self, features: dict) -> dict:
+		"""Прогноз сигнала с confidence score для RiskService."""
+		if not self.model:
+			raise ValueError("Model not trained")
+		X = pd.DataFrame([features])
+		proba = self.model.predict_proba(X)[0]
+		confidence_score = abs(proba[1] - proba[0])
+		result = {"success_probability": proba[1], "confidence_score": confidence_score}
+		# 🔹 Сохраняем эмбеддинг сигнала
+		try:
+			self.save_signal_embedding(features, signal_id=hash(str(features)))
+		except Exception as e:
+			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}")
+		return result
+
+	def get_confidence_score(self, features: dict) -> float:
+		"""Возвращает confidence score для RiskService."""
+		result = self.predict_with_confidence(features)
+		return result["confidence_score"]
+
 	# === PyTorch ===
 	def train_pytorch(self, df: pd.DataFrame):
 		"""Пример обучения простой нейросети на PyTorch."""

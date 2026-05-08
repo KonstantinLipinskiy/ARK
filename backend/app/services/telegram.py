@@ -1,3 +1,4 @@
+# app/services/telegram.py
 import os
 import asyncio
 from aiogram import Bot, Dispatcher, types
@@ -7,7 +8,7 @@ from sqlalchemy import select
 
 # Импортируем наш общий логгер
 from app.utils.logger import logger
-from app.db.schemas import TradeORM, SignalORM, UserORM
+from app.db.schemas import TradeORM, SignalORM, UserORM, RiskLog
 from app.services.rabbitmq import RabbitMQBroker
 from app.utils.metrics import calculate_metrics
 from app.config import Settings
@@ -30,17 +31,14 @@ class TelegramService:
 		await self.bot.send_message(chat_id=self.chat_id, text=text)
 
 	async def send_trade_notification(self, trade: dict, user_id: int | None = None):
-		"""
-		Отправка уведомления о сделке.
-		Проверяем настройки пользователя: notifications_enabled.
-		"""
+		"""Отправка уведомления о сделке с проверкой настроек пользователя."""
 		if user_id:
 			async with get_session() as session:
 					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
 					user = result.scalars().first()
 					if user and user.settings and not user.settings.get("notifications_enabled", True):
 						logger.info(f"🔕 Уведомления отключены для пользователя {user.username}")
-						return  # не отправляем уведомление
+						return
 
 		msg = (
 			f"📊 Сделка по {trade.get('pair', 'N/A')}\n"
@@ -52,11 +50,8 @@ class TelegramService:
 		)
 		await self.send_message(msg)
 
-	async def send_error(self, error: str, user_id: int | None = None):
-		"""
-		Отправка ошибки.
-		Проверяем notifications_enabled.
-		"""
+	async def send_error(self, error: str, user_id: int | None = None, symbol: str = "-", position_size: float = 0.0, deposit: float = 0.0):
+		"""Отправка ошибки с деталями (если есть)."""
 		if user_id:
 			async with get_session() as session:
 					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
@@ -65,7 +60,7 @@ class TelegramService:
 						logger.info(f"🔕 Ошибки не отправляются — уведомления отключены для пользователя {user.username}")
 						return
 
-		msg = f"❌ Ошибка: {error}"
+		msg = f"❌ Ошибка: {error}\nСимвол: {symbol}, Размер позиции: {position_size:.4f}, Депозит: {deposit:.2f}"
 		await self.send_message(msg)
 
 telegram_service = TelegramService(bot, settings.TELEGRAM_CHAT_ID)
@@ -154,15 +149,36 @@ async def risk_command(message: types.Message):
 	async with get_session() as session:
 		risk_service = RiskService(db_session=session)
 		await risk_service.refresh_config()
-		limits = risk_service.get_limits()
+		limits = await risk_service.get_limits(user_id=None)
 		msg = (
 			f"📉 Лимиты риск менеджмента:\n"
 			f"Stop Loss (из стратегии): {limits.get('stop_loss_pct', '-')}\n"
 			f"Default Trade Loss: {limits.get('default_trade_loss_pct', '-')}\n"
 			f"Макс. количество сделок: {limits.get('max_trades', '-')}\n"
-			f"Макс. плечо: {limits.get('max_leverage', '-')}"
+			f"Макс. плечо: {limits.get('max_leverage', '-')}\n"
+			f"Макс. дневной убыток: {limits.get('max_daily_loss', '-')}\n"
+			f"Risk/Reward Ratio: {limits.get('risk_reward_ratio', '-')}\n"
+			f"Cooldown: {limits.get('cooldown_between_trades', '-')}\n"
+			f"Dynamic Allocation: {limits.get('dynamic_allocation', False)}"
 		)
 		await message.answer(msg)
+
+@dp.message(Command("violations"))
+async def violations_command(message: types.Message):
+	if not is_authorized(message):
+		return
+	logger.info("Выполнена команда /violations")
+	async with get_session() as session:
+		result = await session.execute(select(RiskLog).order_by(RiskLog.timestamp.desc()).limit(5))
+		violations = result.scalars().all()
+		if violations:
+			msg = "\n".join([
+					f"{v.timestamp} — {v.reason} (symbol={v.symbol}, pos={v.position_size}, dep={v.deposit})"
+					for v in violations
+			])
+			await message.answer(f"⚠️ Последние нарушения риск менеджмента:\n{msg}")
+		else:
+			await message.answer("Нарушений риск менеджмента не зафиксировано.")
 
 @dp.message(Command("limits"))
 async def limits_command(message: types.Message):
@@ -170,97 +186,29 @@ async def limits_command(message: types.Message):
 		return
 	logger.info("Выполнена команда /limits")
 	async with get_session() as session:
+		risk_service = RiskService(db_session=session)
+		await risk_service.refresh_config()
+		limits = await risk_service.get_limits(user_id=None)
+
 		strategies = await load_strategies(session)
 		msg_lines = []
 		for symbol, cfg in strategies.items():
 			msg_lines.append(
-					f"{symbol}: Stop Loss={cfg.get('stop_loss', '-')}, Leverage={cfg.get('leverage', '-')}"
+					f"{symbol}: Stop Loss={cfg.get('stop_loss', '-')}, "
+					f"Leverage={cfg.get('leverage', '-')}, "
+					f"Allocation={cfg.get('allocation_percent', '-')}"
 			)
-		msg = "📈 Лимиты по стратегиям:\n" + "\n".join(msg_lines)
-		await message.answer(msg)
 
-@dp.message(Command("metrics"))
-async def metrics_command(message: types.Message):
-	if not is_authorized(message):
-		return
-	logger.info("Выполнена команда /metrics")
-	args = message.text.split()
-	if len(args) < 2:
-		await message.answer("❗ Использование: /metrics SYMBOL")
-		return
-	symbol = args[1].upper()
-	async with get_session() as session:
-		result = await session.execute(select(TradeORM).where(TradeORM.symbol == symbol))
-		trades = result.scalars().all()
-		if not trades:
-			await message.answer(f"Нет сделок по {symbol}")
-			return
-		metrics = calculate_metrics(trades)
 		msg = (
-			f"📊 Отчёт по {symbol}:\n"
-			f"Всего сделок: {metrics['trades_count']}\n"
-			f"Winrate: {metrics['winrate']:.2%}\n"
-			f"Profit: {metrics['total_profit']:.2f}\n"
-			f"Drawdown: {metrics['max_drawdown']:.2f}\n"
-			f"Sharpe: {metrics['sharpe_ratio']:.2f}\n"
-			f"Sortino: {metrics['sortino_ratio']:.2f}\n"
-			f"Profit Factor: {metrics['profit_factor']:.2f}\n"
-			f"Макс. серия побед: {metrics['max_consecutive_wins']}\n"
-			f"Макс. серия поражений: {metrics['max_consecutive_losses']}"
+			"📈 Лимиты по стратегиям:\n" + "\n".join(msg_lines) +
+			"\n\n📉 Общие лимиты риск менеджмента:\n"
+			f"Stop Loss (из стратегии): {limits.get('stop_loss_pct', '-')}\n"
+			f"Default Trade Loss: {limits.get('default_trade_loss_pct', '-')}\n"
+			f"Макс. количество сделок: {limits.get('max_trades', '-')}\n"
+			f"Макс. плечо: {limits.get('max_leverage', '-')}\n"
+			f"Макс. дневной убыток: {limits.get('max_daily_loss', '-')}\n"
+			f"Risk/Reward Ratio: {limits.get('risk_reward_ratio', '-')}\n"
+			f"Cooldown: {limits.get('cooldown_between_trades', '-')}\n"
+			f"Dynamic Allocation: {limits.get('dynamic_allocation', False)}"
 		)
 		await message.answer(msg)
-
-@dp.message(Command("signal"))
-async def signal_command(message: types.Message):
-	if not is_authorized(message):
-		return
-	logger.info("Выполнена команда /signal")
-	async with get_session() as session:
-		result = await session.execute(select(SignalORM).order_by(SignalORM.timestamp.desc()).limit(5))
-		signals = result.scalars().all()
-		if signals:
-			msg = "\n".join([f"{s.symbol} {s.indicator} {s.direction} (strength={s.strength})" for s in signals])
-			await message.answer(f"📡 Последние сигналы:\n{msg}")
-		else:
-			await message.answer("Сигналы отсутствуют.")
-
-@dp.message(Command("help"))
-async def help_command(message: types.Message):
-	if not is_authorized(message):
-		return
-	logger.info("Выполнена команда /help")
-	await message.answer(
-		"📖 Доступные команды:\n"
-		"/start — запуск бота\n"
-		"/status — активные позиции\n"
-		"/trades — история сделок\n"
-		"/report — отчёт по метрикам\n"
-		"/config — настройки стратегии\n"
-		"/risk — лимиты риск менеджмента\n"
-		"/limits — лимиты по стратегиям\n"
-		"/metrics SYMBOL — метрики по конкретному инструменту\n"
-		"/signal — последние торговые сигналы\n"
-		"/id — показать ваш chat_id\n"
-		"/help — список команд"
-	)
-
-@dp.message(Command("id"))
-async def get_id(message: types.Message):
-	if not is_authorized(message):
-		return
-	logger.info(f"Запрос chat_id от пользователя {message.chat.id}")
-	await message.answer(f"Ваш chat_id: {message.chat.id}")
-
-# --- Запуск бота ---
-async def main():
-	logger.info("Запуск Telegram бота...")
-	try:
-		await broker.connect()  # подключение к RabbitMQ
-		await dp.start_polling(bot)
-	finally:
-		await broker.close()
-		await bot.session.close()
-		logger.info("Сессия Telegram бота закрыта")
-
-if __name__ == "__main__":
-	asyncio.run(main())
