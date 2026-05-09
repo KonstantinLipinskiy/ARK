@@ -28,8 +28,8 @@ class IndicatorsService:
 			# Валидация входных данных
 			self._validate_inputs(kwargs)
 
-			# Расчёт индикатора
-			result = IndicatorFactory.calculate(indicator_name, **kwargs)
+			# Асинхронный расчёт индикатора через фабрику
+			result = await IndicatorFactory.calculate_async(indicator_name, **kwargs)
 
 			# Сохранение в БД
 			await self._save_to_db(pair, indicator_name, result)
@@ -37,11 +37,11 @@ class IndicatorsService:
 			# Публикация в Redis (для воркеров/уведомлений)
 			await self._publish_to_redis(pair, indicator_name, result)
 
-			logger.info(f"✅ Indicator {indicator_name} успешно рассчитан и сохранён")
+			logger.info(f"✅ Indicator {indicator_name} успешно рассчитан и сохранён | Параметры: {kwargs}")
 			return result
 
 		except Exception as e:
-			logger.error(f"❌ Error in IndicatorsService.calculate_and_store: {e}")
+			logger.error(f"❌ Error in IndicatorsService.calculate_and_store: {e} | Параметры: {kwargs}")
 			return None
 
 	async def _save_to_db(self, pair: str, indicator_name: str, result):
@@ -49,7 +49,6 @@ class IndicatorsService:
 		Сохраняет рассчитанный индикатор в таблицу indicators.
 		"""
 		try:
-			# Если результат — кортеж (например, MACD), сохраняем все значения
 			if isinstance(result, tuple):
 					values = []
 					for idx, res in enumerate(result):
@@ -118,3 +117,8 @@ class IndicatorsService:
 						raise ValueError(f"❌ Series {key} contains only NaN")
 					if len(value) < 5:
 						raise ValueError(f"❌ Series {key} too short for calculation")
+		# Дополнительная проверка параметров
+		if "period" in kwargs:
+			period = kwargs["period"]
+			if not isinstance(period, int) or period <= 0:
+					raise ValueError(f"❌ Invalid period value: {period}. Must be int > 0")

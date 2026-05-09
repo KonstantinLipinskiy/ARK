@@ -1,5 +1,7 @@
 # app/services/indicator_factory.py
 import pandas as pd
+import inspect
+import asyncio
 from app.services import indicators
 from app.utils.logger import logger
 
@@ -37,7 +39,7 @@ class IndicatorFactory:
 	@classmethod
 	def calculate(cls, name: str, **kwargs):
 		"""
-		Унифицированный вызов индикатора.
+		Унифицированный вызов индикатора (синхронный).
 		Пример: IndicatorFactory.calculate("EMA", series=close, period=14)
 		"""
 		if name not in cls._registry:
@@ -50,16 +52,42 @@ class IndicatorFactory:
 
 		try:
 			result = func(**kwargs)
-			logger.info(f"✅ Indicator {name} успешно рассчитан")
+			logger.info(f"✅ Indicator {name} рассчитан | Параметры: {kwargs}")
 			return result
 		except Exception as e:
-			logger.error(f"❌ Error calculating {name}: {e}")
+			logger.error(f"❌ Error calculating {name}: {e} | Параметры: {kwargs}")
 			raise RuntimeError(f"❌ Error calculating {name}: {e}")
+
+	@classmethod
+	async def calculate_async(cls, name: str, **kwargs):
+		"""
+		Асинхронный вызов индикатора.
+		Если функция синхронная — выполняется в отдельном потоке.
+		"""
+		if name not in cls._registry:
+			logger.error(f"❌ Unknown indicator: {name}")
+			raise ValueError(f"❌ Unknown indicator: {name}")
+		func = cls._registry[name]
+
+		cls._validate_inputs(kwargs)
+
+		try:
+			if inspect.iscoroutinefunction(func):
+					result = await func(**kwargs)
+			else:
+					loop = asyncio.get_event_loop()
+					result = await loop.run_in_executor(None, lambda: func(**kwargs))
+			logger.info(f"✅ Indicator {name} рассчитан (async) | Параметры: {kwargs}")
+			return result
+		except Exception as e:
+			logger.error(f"❌ Async error calculating {name}: {e} | Параметры: {kwargs}")
+			raise RuntimeError(f"❌ Async error calculating {name}: {e}")
 
 	@staticmethod
 	def _validate_inputs(kwargs: dict):
 		"""
-		Проверка входных данных: серии не пустые, достаточная длина, нет NaN.
+		Проверка входных данных: серии не пустые, достаточная длина, нет NaN,
+		а также базовая проверка параметров (например, period > 0).
 		"""
 		for key, value in kwargs.items():
 			if isinstance(value, pd.Series):
@@ -69,3 +97,9 @@ class IndicatorFactory:
 						raise ValueError(f"❌ Series {key} contains only NaN")
 					if len(value) < 5:
 						raise ValueError(f"❌ Series {key} too short for calculation")
+
+		# Дополнительная проверка параметров
+		if "period" in kwargs:
+			period = kwargs["period"]
+			if not isinstance(period, int) or period <= 0:
+					raise ValueError(f"❌ Invalid period value: {period}. Must be int > 0")

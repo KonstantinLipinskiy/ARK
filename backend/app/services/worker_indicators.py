@@ -40,11 +40,20 @@ class IndicatorWorker:
 					async with async_session() as session:
 						redis = RedisCache()
 						service = IndicatorsService(session, redis)
-						# heavy calc вынесен в отдельный таск
-						await service.calculate_and_store(pair, indicator, **kwargs)
+						# heavy calc вынесен в отдельный таск (async)
+						result = await service.calculate_and_store(pair, indicator, **kwargs)
 
 					elapsed = round(time.time() - start_time, 3)
-					logger.info(f"✅ Indicator {indicator} for {pair} calculated and stored (elapsed {elapsed}s)")
+					if result is not None:
+						logger.info(
+							f"✅ Indicator {indicator} for {pair} calculated and stored "
+							f"(elapsed {elapsed}s, params={kwargs})"
+						)
+					else:
+						logger.error(
+							f"❌ Indicator {indicator} for {pair} failed "
+							f"(elapsed {elapsed}s, params={kwargs})"
+						)
 
 			elif task_type == "ml_train":
 					trades = message.get("trades", [])
@@ -58,15 +67,18 @@ class IndicatorWorker:
 						df = self.ml_service.prepare_data(trades)
 						metrics = self.ml_service.train(df, model_type=model_type)
 						elapsed = round(time.time() - start_time, 3)
-						logger.info(f"🤖 ML training completed for {pair} ({model_type}) in {elapsed}s: {metrics}")
+						logger.info(
+							f"🤖 ML training completed for {pair} ({model_type}) "
+							f"in {elapsed}s: {metrics}"
+						)
 					except Exception as e:
-						logger.error(f"❌ ML training error: {e}")
+						logger.error(f"❌ ML training error: {e} | trades={len(trades)}")
 
 			else:
 					logger.error(f"❌ Unknown task type: {task_type}")
 
 		except Exception as e:
-			logger.error(f"❌ Worker error: {e}")
+			logger.error(f"❌ Worker error: {e} | message={message}")
 
 	async def start(self):
 		"""
