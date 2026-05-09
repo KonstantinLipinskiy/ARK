@@ -28,7 +28,6 @@ def build_features(row: pd.Series) -> dict:
 
 # --- Основной бэктест ---
 async def backtest_strategy(data: pd.DataFrame, pair: str, strategy_name: str = "default", session: AsyncSession = None):
-	# 🔹 Загружаем стратегию из БД
 	strategies = await load_strategies(session)
 	config = strategies[pair]
 
@@ -71,13 +70,11 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy_name: str = 
 	for i in range(1, len(data)):
 		row = data.iloc[i]
 
-		# Фильтры
 		if "OBV" in config["enabled_indicators"] and row["obv"] <= data["obv"].iloc[i-1]:
 			continue
 		if "Volume" in config["enabled_indicators"] and row["volume"] < row["vol_sma"]:
 			continue
 
-		# Входы по условиям из entry_conditions
 		if position is None and "entry_conditions" in config:
 			for condition in config["entry_conditions"]:
 					signals = []
@@ -251,13 +248,11 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str):
 	plt.plot(data["close"], label="Close Price", color="blue")
 
 	for t in trades:
-		# Находим ближайший индекс к цене входа
 		entry_idx = int(np.argmin(np.abs(data["close"] - t["entry"])))
 		plt.axvline(x=entry_idx, color="green", linestyle="--")
 		plt.text(entry_idx, t["entry"], f"x{t.get('leverage',1)}",
 					color="black", fontsize=8, rotation=90)
 
-		# Находим ближайший индекс к цене выхода
 		if "exit" in t:
 			exit_idx = int(np.argmin(np.abs(data["close"] - t["exit"])))
 			plt.axvline(x=exit_idx, color="red", linestyle="--")
@@ -267,7 +262,6 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str):
 	plt.ylabel("Price")
 	plt.legend()
 	plt.show()
-
 
 # --- Пример запуска ---
 if __name__ == "__main__":
@@ -288,6 +282,16 @@ if __name__ == "__main__":
 
 					await save_trades_to_db(results, pair, strategy_name="EMA+RSI")
 					await save_metrics_to_db(metrics, pair, strategy_name="EMA+RSI")
+
+					# --- Автоматическое обучение ML модели на истории ---
+					try:
+						df_trades = pd.DataFrame(results)
+						if not df_trades.empty:
+							df_trades["result"] = (df_trades["exit"] - df_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
+							train_metrics = ml_service.train(df_trades, model_type="sklearn")
+							logger.info(f"ML обучение завершено для {pair}: {train_metrics}")
+					except Exception as e:
+						logger.error(f"Ошибка обучения ML на истории {pair}: {e}")
 
 					plot_backtest(df, results, pair)
 

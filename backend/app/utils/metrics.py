@@ -1,6 +1,8 @@
 from typing import List, Dict, Union
 import math
+from prometheus_client import Gauge
 
+# --- Trading Metrics ---
 def _extract_profit(trade: Union[Dict, object]) -> float:
 	"""Универсальный доступ к профиту (dict или ORM)."""
 	return trade["profit"] if isinstance(trade, dict) else getattr(trade, "profit", 0.0)
@@ -80,3 +82,21 @@ def calculate_metrics(trades: List[Union[Dict, object]]) -> Dict:
 		**calculate_max_consecutive(trades),
 		"trades_count": len(trades)
 	}
+
+# --- ML Training Metrics (Prometheus) ---
+ml_accuracy = Gauge("ml_training_accuracy", "Accuracy of ML training")
+ml_loss = Gauge("ml_training_loss", "Loss of ML training")
+
+def export_ml_metrics(metrics: Dict[str, float]):
+	"""
+	Экспорт метрик обучения ML модели в Prometheus.
+	metrics: словарь с ключами accuracy, loss
+	"""
+	try:
+		if "accuracy" in metrics:
+			ml_accuracy.set(metrics["accuracy"])
+		if "loss" in metrics:
+			ml_loss.set(metrics["loss"])
+	except Exception as e:
+		# Логируем, но не прерываем работу
+		print(f"❌ Ошибка экспорта ML метрик: {e}")

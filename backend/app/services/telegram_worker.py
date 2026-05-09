@@ -1,5 +1,7 @@
+# app/services/telegram_worker.py
 import os
 import asyncio
+import json
 from aiogram import Bot
 from dotenv import load_dotenv
 from app.utils.logger import logger
@@ -20,8 +22,32 @@ async def process_notification(message: str):
 	"""
 	logger.info(f"📨 Telegram worker получил сообщение: {message}")
 	try:
-		# Можно парсить JSON, если будешь публиковать payload как json.dumps()
-		await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+		payload = None
+		try:
+			payload = json.loads(message)
+		except Exception:
+			# если это просто строка
+			payload = {"text": message}
+
+		text = payload.get("text", "")
+		msg_type = payload.get("type", "info")
+
+		if msg_type == "ml_report":
+			# уведомление о завершении ML обучения
+			model_type = payload.get("model_type", "sklearn")
+			metrics = payload.get("metrics", {})
+			text = (
+					f"🤖 ML обучение завершено ({model_type})\n"
+					f"Accuracy: {metrics.get('accuracy', '-')}\n"
+					f"Precision: {metrics.get('precision', '-')}\n"
+					f"Recall: {metrics.get('recall', '-')}"
+			)
+
+		elif msg_type == "error":
+			text = f"❌ Ошибка: {payload.get('error', 'Неизвестная ошибка')}"
+
+		await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
+
 	except Exception as e:
 		logger.error(f"❌ Ошибка отправки в Telegram: {e}")
 
