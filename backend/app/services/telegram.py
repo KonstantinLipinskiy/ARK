@@ -46,11 +46,12 @@ class TelegramService:
 							f"📊 Сделка по {trade.get('pair', 'N/A')}\n"
 							f"Статус: {trade.get('status', '-')}\n"
 							f"Вход: {trade.get('entry', '-')}\n"
+							f"Стоп-лосс: {trade.get('stop_loss', '-')}\n"
+							f"Тейк-профит: {trade.get('take_profit', '-')}\n"
 							f"Выход: {trade.get('exit', '-')}\n"
-							f"TP: {trade.get('take_profit', '-')}\n"
-							f"SL: {trade.get('stop_loss', '-')}\n"
 							f"Leverage: {trade.get('leverage', '-')}\n"
-							f"Confidence: {trade.get('confidence_score', '-')}"
+							f"Confidence: {trade.get('confidence_score', '-')}\n"
+							f"Рассчитанный риск: {trade.get('risk', '-')}"
 						)
 						await self.send_message_to_user(user, msg)
 
@@ -61,15 +62,29 @@ class TelegramService:
 					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
 					user = result.scalars().first()
 					if user:
-						msg = f"❌ Ошибка: {error}\nСимвол: {symbol}, Размер позиции: {position_size:.4f}, Депозит: {deposit:.2f}"
+						msg = (
+							f"❌ Ошибка: {error}\n"
+							f"Символ: {symbol}\n"
+							f"Размер позиции: {position_size:.4f}\n"
+							f"Депозит: {deposit:.2f}"
+						)
 						await self.send_message_to_user(user, msg)
 
 	async def send_order_cancelled(self, user: UserORM, symbol: str, order_id: str, reason: str = "Cancelled"):
 		msg = f"❌ Ордер отменён: {symbol}, id={order_id}, причина: {reason}"
 		await self.send_message_to_user(user, msg)
 
-	async def send_position_closed(self, user: UserORM, symbol: str, amount: float, side: str, exit_price: float):
-		msg = f"📉 Позиция закрыта: {symbol} {amount} {side} @ {exit_price}"
+	async def send_position_closed(self, user: UserORM, symbol: str, amount: float, side: str, exit_price: float,
+											stop_loss: float | None = None, risk: float | None = None):
+		msg = (
+			f"📉 Позиция закрыта: {symbol} {amount} {side} @ {exit_price}\n"
+			f"Стоп-лосс: {stop_loss if stop_loss else '-'}\n"
+			f"Риск: {risk if risk else '-'}"
+		)
+		await self.send_message_to_user(user, msg)
+
+	async def send_margin_mode_changed(self, user: UserORM, symbol: str, mode: str):
+		msg = f"⚙️ Маржинальный режим изменён: {symbol}, новый режим = {mode}"
 		await self.send_message_to_user(user, msg)
 
 
@@ -77,13 +92,11 @@ telegram_service = TelegramService(bot)
 broker = RabbitMQBroker()
 
 async def get_user_by_chat_id(chat_id: int) -> UserORM | None:
-	"""Получить пользователя по telegram chat_id."""
 	async with get_session() as session:
 		result = await session.execute(select(UserORM).filter(UserORM.telegram_id == str(chat_id)))
 		return result.scalars().first()
 
 async def is_authorized(message: types.Message) -> bool:
-	"""Проверка, что пользователь зарегистрирован и активен."""
 	user = await get_user_by_chat_id(message.chat.id)
 	if not user or user.status != "active":
 		logger.warning(f"Попытка доступа от неавторизованного chat_id: {message.chat.id}")
@@ -91,7 +104,6 @@ async def is_authorized(message: types.Message) -> bool:
 	return True
 
 async def is_admin(message: types.Message) -> bool:
-	"""Проверка прав администратора."""
 	user = await get_user_by_chat_id(message.chat.id)
 	return bool(user and user.is_admin)
 
@@ -110,7 +122,7 @@ async def status_command(message: types.Message):
 		trades = result.scalars().all()
 		if trades:
 			msg = "\n".join([
-					f"{t.symbol} {t.side} {t.amount} @ {t.price} (Lev={t.leverage}, Conf={t.confidence_score})"
+					f"{t.symbol} {t.side} {t.amount} @ {t.price} (Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
 					for t in trades
 			])
 			await message.answer(f"📌 Активные позиции:\n{msg}")
@@ -126,7 +138,7 @@ async def trades_command(message: types.Message):
 		trades = result.scalars().all()
 		if trades:
 			msg = "\n".join([
-					f"{t.symbol} {t.side} {t.amount} @ {t.price} ({t.status}, Lev={t.leverage}, Conf={t.confidence_score})"
+					f"{t.symbol} {t.side} {t.amount} @ {t.price} ({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
 					for t in trades
 			])
 			await message.answer(f"📊 Последние сделки:\n{msg}")
@@ -186,6 +198,7 @@ async def risk_command(message: types.Message):
 			f"Макс. дневной убыток: {limits.get('max_daily_loss', '-')}\n"
 			f"Risk/Reward Ratio: {limits.get('risk_reward_ratio', '-')}\n"
 			f"Cooldown: {limits.get('cooldown_between_trades', '-')}\n"
-			f"Dynamic Allocation: {limits.get('dynamic_allocation', False)}"
+			f"Dynamic Allocation: {limits.get('dynamic_allocation', False)}\n"
+			f"Strength Multiplier: {limits.get('strength_multiplier', '-')}"
 		)
 		await message.answer(msg)

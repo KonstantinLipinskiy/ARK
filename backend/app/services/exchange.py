@@ -21,19 +21,31 @@ def get_exchange():
 		"adjustForTimeDifference": True,
 	})
 
-	# Если режим testnet — переопределяем URL
 	if settings.EXCHANGE_CONFIG["mode"] == "testnet" and hasattr(exchange, "urls"):
 		if "test" in exchange.urls:
 			exchange.urls["api"] = exchange.urls["test"]
 
-	# Устанавливаем тип торговли (spot/futures/testnet)
 	trading_mode = settings.TRADING_MODE
 	if trading_mode == "futures":
-		exchange.options["defaultType"] = "linear"  # USDT‑margined futures
+		exchange.options["defaultType"] = "linear"
 	else:
 		exchange.options["defaultType"] = "spot"
 
 	return exchange
+
+# --- ERROR HANDLER ---
+def format_ccxt_error(e: Exception) -> str:
+	err_type = e.__class__.__name__
+	err_msg = str(e)
+
+	if "InsufficientFunds" in err_type or "balance" in err_msg.lower():
+		return f"Недостаточный баланс: {err_msg}"
+	elif "InvalidOrder" in err_type or "symbol" in err_msg.lower():
+		return f"Неверный символ или параметры ордера: {err_msg}"
+	elif "NetworkError" in err_type or "Connection" in err_msg:
+		return f"Ошибка сети/подключения: {err_msg}"
+	else:
+		return f"{err_type}: {err_msg}"
 
 # --- BALANCE ---
 async def get_balance(currency: str = "USDT"):
@@ -42,7 +54,8 @@ async def get_balance(currency: str = "USDT"):
 		balance = await exchange.fetch_balance()
 		return balance["free"].get(currency, 0.0)
 	except Exception as e:
-		logger.error(f"❌ Balance error: {e}")
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Balance error: {msg}")
 		return 0.0
 
 # --- CREATE ORDER ---
@@ -54,12 +67,15 @@ async def create_order(
 	risk_service: RiskService = None,
 	telegram: TelegramService = None,
 	signal_strength: float = None,
+	order_type: str = "market",   # market, limit, stopMarket, takeProfit
+	reduce_only: bool = False,    # поддержка reduceOnly
+	take_profit: float | None = None,
+	stop_price: float | None = None
 ):
 	try:
 		exchange = get_exchange()
 		trading_mode = settings.TRADING_MODE
 
-		# --- Расчёт объёма через RiskService ---
 		if risk_service:
 			await risk_service.refresh_config()
 			deposit = await get_balance("USDT")
@@ -93,32 +109,31 @@ async def create_order(
 			amount = position_size
 
 		# --- Создание ордера ---
-		if trading_mode == "spot":
-			if price:
-					order = await exchange.create_limit_order(symbol, side, amount, price)
-			else:
-					order = await exchange.create_market_order(symbol, side, amount)
+		params = {"reduceOnly": reduce_only}
 
-		elif trading_mode == "futures":
+		if trading_mode == "futures":
 			leverage = risk_service.calculate_leverage(symbol, signal_strength or 1.0) if risk_service else 1
 			await exchange.set_leverage(leverage, symbol)
 
-			if price:
-					order = await exchange.create_limit_order(
-						symbol, side, amount, price, params={"reduceOnly": False}
-					)
+			if order_type == "limit" and price:
+					order = await exchange.create_limit_order(symbol, side, amount, price, params=params)
+			elif order_type == "market":
+					order = await exchange.create_market_order(symbol, side, amount, params=params)
+			elif order_type == "stopMarket" and stop_price:
+					params.update({"stopPrice": stop_price})
+					order = await exchange.create_order(symbol, side, order_type, amount, params=params)
+			elif order_type == "takeProfit" and take_profit:
+					params.update({"takeProfitPrice": take_profit})
+					order = await exchange.create_order(symbol, side, order_type, amount, params=params)
 			else:
-					order = await exchange.create_market_order(
-						symbol, side, amount, params={"reduceOnly": False}
-					)
+					order = await exchange.create_market_order(symbol, side, amount, params=params)
 
-		elif trading_mode == "testnet":
-			if price:
+		else:  # spot/testnet
+			if order_type == "limit" and price:
 					order = await exchange.create_limit_order(symbol, side, amount, price)
 			else:
 					order = await exchange.create_market_order(symbol, side, amount)
 
-		# --- Сохранение сделки в БД ---
 		if risk_service:
 			trade = TradeORM(
 					symbol=symbol,
@@ -126,20 +141,23 @@ async def create_order(
 					amount=amount,
 					price=price or 0.0,
 					status="open",
-					exchange_order_id=order.get("id")  # сохраняем ID ордера с биржи
+					exchange_order_id=order.get("id")
 			)
 			risk_service.db_session.add(trade)
 			await risk_service.db_session.commit()
 
 		if telegram:
-			await telegram.send_message(f"✅ Order created: {symbol} {side} {amount}")
+			await telegram.send_message(
+					f"✅ Order created: {symbol} {side} {amount}, type={order_type}, reduceOnly={reduce_only}"
+			)
 
 		return order
 	except Exception as e:
-		logger.error(f"❌ Order error: {e}")
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Order error: {msg}")
 		if telegram:
-			await telegram.send_message(f"❌ Order failed: {e}")
-		return {"error": str(e)}
+			await telegram.send_message(f"❌ Order failed: {msg}")
+		return {"error": msg}
 
 # --- CANCEL ORDER ---
 async def cancel_order(symbol: str, order_id: str, risk_service: RiskService = None, telegram: TelegramService = None):
@@ -147,7 +165,6 @@ async def cancel_order(symbol: str, order_id: str, risk_service: RiskService = N
 		exchange = get_exchange()
 		result = await exchange.cancel_order(order_id, symbol)
 
-		# --- Обновление статуса сделки в БД ---
 		if risk_service:
 			stmt = select(TradeORM).where(TradeORM.exchange_order_id == order_id)
 			trade = (await risk_service.db_session.execute(stmt)).scalar_one_or_none()
@@ -159,8 +176,9 @@ async def cancel_order(symbol: str, order_id: str, risk_service: RiskService = N
 			await telegram.send_message(f"⚠️ Order canceled: {order_id}")
 		return result
 	except Exception as e:
-		logger.error(f"❌ Cancel error: {e}")
-		return {"error": str(e)}
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Cancel error: {msg}")
+		return {"error": msg}
 
 # --- GET POSITIONS ---
 async def get_positions(symbol: str = None):
@@ -175,8 +193,9 @@ async def get_positions(symbol: str = None):
 		else:
 			return await exchange.fetch_balance()
 	except Exception as e:
-		logger.error(f"❌ Positions error: {e}")
-		return {"error": str(e)}
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Positions error: {msg}")
+		return {"error": msg}
 
 # --- GET OPEN ORDERS ---
 async def get_open_orders(symbol: str = None):
@@ -184,8 +203,9 @@ async def get_open_orders(symbol: str = None):
 		exchange = get_exchange()
 		return await exchange.fetch_open_orders(symbol)
 	except Exception as e:
-		logger.error(f"❌ Open orders error: {e}")
-		return {"error": str(e)}
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Open orders error: {msg}")
+		return {"error": msg}
 
 # --- CLOSE POSITION ---
 async def close_position(symbol: str, risk_service: RiskService = None, telegram: TelegramService = None):
@@ -199,7 +219,6 @@ async def close_position(symbol: str, risk_service: RiskService = None, telegram
 						symbol, side, pos["contracts"], params={"reduceOnly": True}
 					)
 
-					# --- Обновление статуса сделки в БД ---
 					if risk_service and pos.get("id"):
 						stmt = select(TradeORM).where(TradeORM.exchange_order_id == pos["id"])
 						trade = (await risk_service.db_session.execute(stmt)).scalar_one_or_none()
@@ -211,8 +230,9 @@ async def close_position(symbol: str, risk_service: RiskService = None, telegram
 			await telegram.send_message(f"🔒 Position closed: {symbol}")
 		return {"status": "closed"}
 	except Exception as e:
-		logger.error(f"❌ Close position error: {e}")
-		return {"error": str(e)}
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Close position error: {msg}")
+		return {"error": msg}
 
 # --- TRADE HISTORY ---
 async def get_trade_history(symbol: str = None):
@@ -220,8 +240,9 @@ async def get_trade_history(symbol: str = None):
 		exchange = get_exchange()
 		return await exchange.fetch_my_trades(symbol)
 	except Exception as e:
-		logger.error(f"❌ Trade history error: {e}")
-		return {"error": str(e)}
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Trade history error: {msg}")
+		return {"error": msg}
 
 # --- SET MARGIN MODE ---
 async def set_margin_mode(symbol: str, mode: str = "isolated"):
@@ -230,5 +251,6 @@ async def set_margin_mode(symbol: str, mode: str = "isolated"):
 		await exchange.set_margin_mode(mode, symbol)
 		return {"status": f"Margin mode set to {mode}"}
 	except Exception as e:
-		logger.error(f"❌ Margin mode error: {e}")
-		return {"error": str(e)}
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Margin mode error: {msg}")
+		return {"error": msg}
