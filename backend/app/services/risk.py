@@ -11,9 +11,9 @@ from app.services.risk_service import load_risk_settings
 
 # 🔹 Профили риска
 RISK_PROFILES = {
-	"conservative": {"max_risk_per_trade": 0.005, "max_daily_loss": 0.03, "max_leverage": 1},
-	"moderate": {"max_risk_per_trade": 0.01, "max_daily_loss": 0.05, "max_leverage": 3},
-	"aggressive": {"max_risk_per_trade": 0.02, "max_daily_loss": 0.1, "max_leverage": 5},
+    "conservative": {"max_risk_per_trade": 0.005, "max_daily_loss": 0.03, "max_leverage": 1},
+    "moderate": {"max_risk_per_trade": 0.01, "max_daily_loss": 0.05, "max_leverage": 3},
+    "aggressive": {"max_risk_per_trade": 0.02, "max_daily_loss": 0.1, "max_leverage": 5},
 }
 
 class RiskService:
@@ -190,21 +190,46 @@ class RiskService:
 					symbol, deposit, entry_price, stop_loss_pct, strength, user_id
 			)
 
+			# --- Проверка дневного лимита ---
 			if not self.check_daily_loss(total_loss_pct, risk_config):
 					await self._log_violation("Daily loss limit exceeded", symbol, position_size, deposit)
-					await self.broker.publish_telegram({"text": f"❌ Daily loss limit exceeded on {symbol}"})
+					await self.broker.publish_telegram({
+						"type": "risk_violation",
+						"user_id": user_id,
+						"reason": "Daily loss limit exceeded",
+						"symbol": symbol,
+						"position_size": position_size,
+						"deposit": deposit
+					})
 					return False
 
+			# --- Проверка количества сделок ---
 			if not self.check_open_trades(open_trades, risk_config):
 					await self._log_violation("Too many open trades", symbol, position_size, deposit)
-					await self.broker.publish_telegram({"text": f"❌ Too many open trades for {symbol}"})
+					await self.broker.publish_telegram({
+						"type": "risk_violation",
+						"user_id": user_id,
+						"reason": "Too many open trades",
+						"symbol": symbol,
+						"position_size": position_size,
+						"deposit": deposit
+					})
 					return False
 
+			# --- Проверка cooldown ---
 			if not self.check_cooldown(risk_config):
 					await self._log_violation("Cooldown between trades not respected", symbol, position_size, deposit)
-					await self.broker.publish_telegram({"text": f"❌ Cooldown not respected for {symbol}"})
+					await self.broker.publish_telegram({
+						"type": "risk_violation",
+						"user_id": user_id,
+						"reason": "Cooldown not respected",
+						"symbol": symbol,
+						"position_size": position_size,
+						"deposit": deposit
+					})
 					return False
 
+			# --- Проверка Risk/Reward ---
 			rr_ratio = risk_config.get("risk_reward_ratio", 1.5)
 			potential_loss = entry_price * stop_loss_pct
 
@@ -219,45 +244,38 @@ class RiskService:
 
 			if potential_profit / potential_loss < rr_ratio:
 					await self._log_violation("Risk/Reward ratio too low", symbol, position_size, deposit)
-					await self.broker.publish_telegram({"text": f"❌ Risk/Reward ratio too low for {symbol}"})
+					await self.broker.publish_telegram({
+						"type": "risk_violation",
+						"user_id": user_id,
+						"reason": "Risk/Reward ratio too low",
+						"symbol": symbol,
+						"position_size": position_size,
+						"deposit": deposit
+					})
 					return False
 
+			# --- Успешная валидация ---
 			self.last_trade_time = datetime.utcnow()
+			await self.broker.publish_telegram({
+					"type": "trade",
+					"user_id": user_id,
+					"trade": {
+						"pair": symbol,
+						"status": "validated",
+						"entry": entry_price,
+						"stop_loss": stop_loss_pct,
+						"take_profit": tp_targets,
+						"leverage": risk_config.get("max_leverage", 1),
+						"confidence_score": strength
+					}
+			})
 			return True
 
 		except Exception as e:
 			logger.error(f"❌ Risk validation error: {e}")
+			await self.broker.publish_telegram({
+					"type": "error",
+					"user_id": user_id,
+					"error": f"Risk validation error: {e}"
+			})
 			return False
-
-	async def _log_violation(self, reason: str, symbol: str = "-", position_size: float = 0.0, deposit: float = 0.0):
-		"""Сохраняет нарушение риск‑менеджмента в таблицу risk_logs с расширенными данными."""
-		try:
-			log = RiskLog(
-					reason=reason,
-					symbol=symbol,
-					position_size=position_size,
-					deposit=deposit,
-					timestamp=datetime.utcnow()
-			)
-			self.db_session.add(log)
-			await self.db_session.commit()
-		except Exception as e:
-			logger.error(f"❌ Failed to log risk violation: {e}")
-			await self.db_session.rollback()
-
-	async def get_limits(self, user_id: int | None = None) -> dict:
-		"""Возвращает ключевые лимиты риск‑менеджмента для Telegram команд (асинхронно)."""
-		risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
-
-		return {
-			"stop_loss_pct": risk_config.get("stop_loss_pct", "-"),
-			"default_trade_loss_pct": risk_config.get("default_trade_loss_pct", "-"),
-			"max_trades": risk_config.get("max_open_trades", "-"),
-			"max_leverage": risk_config.get("max_leverage", "-"),
-			"max_daily_loss": risk_config.get("max_daily_loss", "-"),
-			"risk_reward_ratio": risk_config.get("risk_reward_ratio", "-"),
-			"cooldown_between_trades": risk_config.get("cooldown_between_trades", "-"),
-			"dynamic_allocation": risk_config.get("dynamic_allocation", False),
-			"strength_multiplier": self.STRATEGY_CONFIG.get("strength_multiplier", 1.0)
-		}
-

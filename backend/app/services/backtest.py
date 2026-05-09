@@ -20,190 +20,232 @@ ml_service = MLService()
 ml_service.load_model("models/sklearn_model.pkl", model_type="sklearn")
 
 broker = RabbitMQBroker()
+asyncio.create_task(broker.connect())
 
 def build_features(row: pd.Series) -> dict:
-	"""Формируем признаки для ML модели из строки DataFrame."""
-	return {
-		"ema": row.get("ema_short", 0),
-		"rsi": row.get("rsi", 50),
-		"macd": row.get("macd_line", 0),
-		"hour": datetime.utcnow().hour,
-		"atr": row.get("atr", 0)
-	}
+    """Формируем признаки для ML модели из строки DataFrame."""
+    return {
+        "ema": row.get("ema_short", 0),
+        "rsi": row.get("rsi", 50),
+        "macd": row.get("macd_line", 0),
+        "hour": datetime.utcnow().hour,
+        "atr": row.get("atr", 0)
+    }
 
 # --- Оптимизация индикаторов через numba ---
 @njit
 def fast_equity_curve(profits: np.ndarray, initial_deposit: float):
-	equity_curve = np.cumsum(profits) + initial_deposit
-	peak = np.maximum.accumulate(equity_curve)
-	drawdowns = (equity_curve - peak) / peak
-	return equity_curve, drawdowns
+    equity_curve = np.cumsum(profits) + initial_deposit
+    peak = np.maximum.accumulate(equity_curve)
+    drawdowns = (equity_curve - peak) / peak
+    return equity_curve, drawdowns
 
 # --- Основной бэктест ---
 async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, session: AsyncSession = None):
-	"""Прогон одной стратегии для пары"""
-	trades = []
-	position = None
-	market_type = settings.TRADING_MODE
+    """Прогон одной стратегии для пары"""
+    trades = []
+    position = None
+    market_type = settings.TRADING_MODE
 
-	# --- Индикаторы ---
-	if "EMA" in strategy["enabled_indicators"]:
-		data["ema_short"] = indicators.ema(pd.Series(data["close"]), strategy["ema_short"])
-		data["ema_long"] = indicators.ema(pd.Series(data["close"]), strategy["ema_long"])
+    # --- Индикаторы ---
+    if "EMA" in strategy["enabled_indicators"]:
+        data["ema_short"] = indicators.ema(pd.Series(data["close"]), strategy["ema_short"])
+        data["ema_long"] = indicators.ema(pd.Series(data["close"]), strategy["ema_long"])
 
-	if "RSI" in strategy["enabled_indicators"]:
-		data["rsi"] = indicators.rsi(pd.Series(data["close"]), strategy["rsi_period"])
+    if "RSI" in strategy["enabled_indicators"]:
+        data["rsi"] = indicators.rsi(pd.Series(data["close"]), strategy["rsi_period"])
 
-	if "MACD" in strategy["enabled_indicators"]:
-		macd_line, signal_line = indicators.macd(pd.Series(data["close"]),
-																strategy["macd_fast"],
-																strategy["macd_slow"],
-																strategy["macd_signal"])
-		data["macd_line"], data["macd_signal"] = macd_line, signal_line
+    if "MACD" in strategy["enabled_indicators"]:
+        macd_line, signal_line = indicators.macd(pd.Series(data["close"]),
+                                                 strategy["macd_fast"],
+                                                 strategy["macd_slow"],
+                                                 strategy["macd_signal"])
+        data["macd_line"], data["macd_signal"] = macd_line, signal_line
 
-	if "Bollinger" in strategy["enabled_indicators"]:
-		upper, sma, lower = indicators.bollinger(pd.Series(data["close"]), strategy["bollinger_period"])
-		data["boll_upper"], data["boll_sma"], data["boll_lower"] = upper, sma, lower
+    if "Bollinger" in strategy["enabled_indicators"]:
+        upper, sma, lower = indicators.bollinger(pd.Series(data["close"]), strategy["bollinger_period"])
+        data["boll_upper"], data["boll_sma"], data["boll_lower"] = upper, sma, lower
 
-	if "ATR" in strategy["enabled_indicators"]:
-		data["atr"] = indicators.atr(pd.Series(data["high"]),
-												pd.Series(data["low"]),
-												pd.Series(data["close"]),
-												strategy["atr_period"])
+    if "ATR" in strategy["enabled_indicators"]:
+        data["atr"] = indicators.atr(pd.Series(data["high"]),
+                                     pd.Series(data["low"]),
+                                     pd.Series(data["close"]),
+                                     strategy["atr_period"])
 
-	if "OBV" in strategy["enabled_indicators"]:
-		data["obv"] = indicators.obv(pd.Series(data["close"]), pd.Series(data["volume"]))
+    if "OBV" in strategy["enabled_indicators"]:
+        data["obv"] = indicators.obv(pd.Series(data["close"]), pd.Series(data["volume"]))
 
-	if "Stochastic" in strategy["enabled_indicators"]:
-		data["stoch_k"] = indicators.stochastic(pd.Series(data["close"]),
-															pd.Series(data["high"]),
-															pd.Series(data["low"]),
-															strategy["stochastic_period"])
-		data["stoch_d"] = pd.Series(data["stoch_k"]).rolling(window=3).mean()
+    if "Stochastic" in strategy["enabled_indicators"]:
+        data["stoch_k"] = indicators.stochastic(pd.Series(data["close"]),
+                                                pd.Series(data["high"]),
+                                                pd.Series(data["low"]),
+                                                strategy["stochastic_period"])
+        data["stoch_d"] = pd.Series(data["stoch_k"]).rolling(window=3).mean()
 
-	if "Volume" in strategy["enabled_indicators"]:
-		data["vol_sma"] = pd.Series(data["volume"]).rolling(window=20).mean()
+    if "Volume" in strategy["enabled_indicators"]:
+        data["vol_sma"] = pd.Series(data["volume"]).rolling(window=20).mean()
 
-	# --- Основной цикл по свечам ---
-	for i in range(1, len(data)):
-		row = data.iloc[i]
+    # --- Основной цикл по свечам ---
+    for i in range(1, len(data)):
+        row = data.iloc[i]
 
-		if "OBV" in strategy["enabled_indicators"] and row["obv"] <= data["obv"].iloc[i-1]:
-			continue
-		if "Volume" in strategy["enabled_indicators"] and row["volume"] < row["vol_sma"]:
-			continue
+        if "OBV" in strategy["enabled_indicators"] and row["obv"] <= data["obv"].iloc[i-1]:
+            continue
+        if "Volume" in strategy["enabled_indicators"] and row["volume"] < row["vol_sma"]:
+            continue
 
-		if position is None and "entry_conditions" in strategy:
-			for condition in strategy["entry_conditions"]:
-					signals = []
-					direction = None
+        if position is None and "entry_conditions" in strategy:
+            for condition in strategy["entry_conditions"]:
+                signals = []
+                direction = None
 
-					for ind in condition:
-						if ind == "EMA":
-							if row["ema_short"] > row["ema_long"]:
-									signals.append(True); direction = "long"
-							elif row["ema_short"] < row["ema_long"] and market_type == "futures":
-									signals.append(True); direction = "short"
-							else:
-									signals.append(False)
+                for ind in condition:
+                    if ind == "EMA":
+                        if row["ema_short"] > row["ema_long"]:
+                            signals.append(True); direction = "long"
+                        elif row["ema_short"] < row["ema_long"] and market_type == "futures":
+                            signals.append(True); direction = "short"
+                        else:
+                            signals.append(False)
 
-						elif ind == "RSI":
-							if row["rsi"] < 30:
-									signals.append(True); direction = "long"
-							elif row["rsi"] > 70 and market_type == "futures":
-									signals.append(True); direction = "short"
-							else:
-									signals.append(False)
+                    elif ind == "RSI":
+                        if row["rsi"] < 30:
+                            signals.append(True); direction = "long"
+                        elif row["rsi"] > 70 and market_type == "futures":
+                            signals.append(True); direction = "short"
+                        else:
+                            signals.append(False)
 
-						elif ind == "MACD":
-							if row["macd_line"] > row["macd_signal"]:
-									signals.append(True); direction = "long"
-							elif row["macd_line"] < row["macd_signal"] and market_type == "futures":
-									signals.append(True); direction = "short"
-							else:
-									signals.append(False)
+                    elif ind == "MACD":
+                        if row["macd_line"] > row["macd_signal"]:
+                            signals.append(True); direction = "long"
+                        elif row["macd_line"] < row["macd_signal"] and market_type == "futures":
+                            signals.append(True); direction = "short"
+                        else:
+                            signals.append(False)
 
-						elif ind == "Bollinger":
-							if row["close"] <= row["boll_lower"]:
-									signals.append(True); direction = "long"
-							elif row["close"] >= row["boll_upper"] and market_type == "futures":
-									signals.append(True); direction = "short"
-							else:
-									signals.append(False)
+                    elif ind == "Bollinger":
+                        if row["close"] <= row["boll_lower"]:
+                            signals.append(True); direction = "long"
+                        elif row["close"] >= row["boll_upper"] and market_type == "futures":
+                            signals.append(True); direction = "short"
+                        else:
+                            signals.append(False)
 
-						elif ind == "Stochastic":
-							if row["stoch_k"] < 20 and row["stoch_k"] > row["stoch_d"]:
-									signals.append(True); direction = "long"
-							elif row["stoch_k"] > 80 and row["stoch_k"] < row["stoch_d"] and market_type == "futures":
-									signals.append(True); direction = "short"
-							else:
-									signals.append(False)
+                    elif ind == "Stochastic":
+                        if row["stoch_k"] < 20 and row["stoch_k"] > row["stoch_d"]:
+                            signals.append(True); direction = "long"
+                        elif row["stoch_k"] > 80 and row["stoch_k"] < row["stoch_d"] and market_type == "futures":
+                            signals.append(True); direction = "short"
+                        else:
+                            signals.append(False)
 
-					if all(signals):
-						entry_price = row["close"]
-						stop_price = risk.apply_stop_loss(entry_price, strategy["stop_loss"], direction)
-						tp_levels = risk.apply_take_profit(entry_price, strategy["take_profit_targets"], direction)
+                if all(signals):
+                    entry_price = row["close"]
+                    stop_price = risk.apply_stop_loss(entry_price, strategy["stop_loss"], direction)
+                    tp_levels = risk.apply_take_profit(entry_price, strategy["take_profit_targets"], direction)
 
-						features = build_features(row)
-						probability = ml_service.predict_signal(features)
-						signal_strength = probability * 2
+                    features = build_features(row)
+                    probability = ml_service.predict_signal(features)
+                    signal_strength = probability * 2
 
-						leverage = risk.calculate_leverage(pair, signal_strength)
+                    leverage = risk.calculate_leverage(pair, signal_strength)
 
-						deposit = 1000
-						amount = await risk.calculate_position_size(
-							symbol=pair,
-							deposit=deposit,
-							entry_price=entry_price,
-							stop_loss_pct=strategy["stop_loss"],
-							strength=signal_strength
-						)
+                    deposit = 1000
+                    amount = await risk.calculate_position_size(
+                        symbol=pair,
+                        deposit=deposit,
+                        entry_price=entry_price,
+                        stop_loss_pct=strategy["stop_loss"],
+                        strength=signal_strength
+                    )
 
-						position = {
-							"entry": entry_price,
-							"stop": stop_price,
-							"tp": tp_levels,
-							"status": "open",
-							"side": direction,
-							"amount": amount,
-							"leverage": leverage
-						}
-						break
+                    position = {
+                        "entry": entry_price,
+                        "stop": stop_price,
+                        "tp": tp_levels,
+                        "status": "open",
+                        "side": direction,
+                        "amount": amount,
+                        "leverage": leverage
+                    }
+                    await broker.publish_telegram({
+                        "type": "trade",
+                        "trade": {
+                            "pair": pair,
+                            "side": direction,
+                            "entry": entry_price,
+                            "stop_loss": stop_price,
+                            "take_profit": tp_levels,
+                            "amount": amount,
+                            "leverage": leverage
+                        }
+                    })
+                    break
 
-		elif position is not None:
-			price = row["close"]
+        elif position is not None:
+            price = row["close"]
 
-			if position["side"] == "long":
-					if price <= position["stop"]:
-						position["exit"] = price; position["status"] = "stopped"
-						trades.append(position); position = None
-					elif "ATR" in strategy["enabled_indicators"]:
-						atr_value = row["atr"]
-						dynamic_stop = position["entry"] - 2 * atr_value
-						if price <= dynamic_stop:
-							position["exit"] = price; position["status"] = "atr_stop"
-							trades.append(position); position = None
-					elif price >= position["tp"][0]:
-						position["exit"] = price; position["status"] = "take_profit"
-						trades.append(position); position["tp"].pop(0)
-						if len(position["tp"]) == 0: position = None
+            if position["side"] == "long":
+                if price <= position["stop"]:
+                    position["exit"] = price; position["status"] = "stopped"
+                    trades.append(position)
+                    await broker.publish_telegram({
+                        "type": "trade",
+                        "trade": {**position, "pair": pair}
+                    })
+                    position = None
+                elif "ATR" in strategy["enabled_indicators"]:
+                    atr_value = row["atr"]
+                    dynamic_stop = position["entry"] - 2 * atr_value
+                    if price <= dynamic_stop:
+                        position["exit"] = price; position["status"] = "atr_stop"
+                        trades.append(position)
+                        await broker.publish_telegram({
+                            "type": "trade",
+                            "trade": {**position, "pair": pair}
+                        })
+                        position = None
+                elif price >= position["tp"][0]:
+                    position["exit"] = price; position["status"] = "take_profit"
+                    trades.append(position)
+                    await broker.publish_telegram({
+                        "type": "trade",
+                        "trade": {**position, "pair": pair}
+                    })
+                    position["tp"].pop(0)
+                    if len(position["tp"]) == 0: position = None
 
-			elif position["side"] == "short":
-					if price >= position["stop"]:
-						position["exit"] = price; position["status"] = "stopped"
-						trades.append(position); position = None
-					elif "ATR" in strategy["enabled_indicators"]:
-						atr_value = row["atr"]
-						dynamic_stop = position["entry"] + 2 * atr_value
-						if price >= dynamic_stop:
-							position["exit"] = price; position["status"] = "atr_stop"
-							trades.append(position); position = None
-					elif price <= position["tp"][0]:
-						position["exit"] = price; position["status"] = "take_profit"
-						trades.append(position); position["tp"].pop(0)
-						if len(position["tp"]) == 0: position = None
-
-	return trades
+            elif position["side"] == "short":
+                if price >= position["stop"]:
+                    position["exit"] = price; position["status"] = "stopped"
+                    trades.append(position)
+                    await broker.publish_telegram({
+                        "type": "trade",
+                        "trade": {**position, "pair": pair}
+                    })
+                    position = None
+                elif "ATR" in strategy["enabled_indicators"]:
+                    atr_value = row["atr"]
+                    dynamic_stop = position["entry"] + 2 * atr_value
+                    if price >= dynamic_stop:
+                        position["exit"] = price; position["status"] = "atr_stop"
+                        trades.append(position)
+                        await broker.publish_telegram({
+                            "type": "trade",
+                            "trade": {**position, "pair": pair}
+                        })
+                        position = None
+                elif price <= position["tp"][0]:
+                    position["exit"] = price; position["status"] = "take_profit"
+                    trades.append(position)
+                    await broker.publish_telegram({
+                        "type": "trade",
+                        "trade": {**position, "pair": pair}
+                    })
+                    position["tp"].pop(0)
+                    if len(position["tp"]) == 0: position = None
+    return trades
 
 # --- Метрики ---
 def calculate_metrics(trades, initial_deposit=1000):

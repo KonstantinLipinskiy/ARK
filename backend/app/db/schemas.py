@@ -90,6 +90,9 @@ class UserORM(Base):
 	# 🔹 интеграция
 	telegram_id = Column(String(50), unique=True, index=True)
 
+	# 🔹 права доступа
+	is_admin = Column(Boolean, default=False, nullable=False)
+
 	# 🔹 метаданные
 	created_at = Column(DateTime, server_default=func.now())
 	last_login = Column(DateTime, nullable=True)
@@ -199,4 +202,3 @@ class IndicatorORM(Base):
 	name = Column(String(50), nullable=False, index=True)       # EMA, RSI, MACD
 	value = Column(String(255), nullable=False)                 # последнее рассчитанное значение
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
-

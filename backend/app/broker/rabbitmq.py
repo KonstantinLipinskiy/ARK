@@ -22,7 +22,7 @@ class RabbitMQBroker:
 		self.channel = None
 
 	async def connect(self):
-		"""Асинхронное подключение к RabbitMQ."""
+		"""Асинхронное подключение к RabbitMQ и объявление всех очередей."""
 		try:
 			self.connection = await aio_pika.connect_robust(self.host)
 			self.channel = await self.connection.channel()
@@ -36,6 +36,7 @@ class RabbitMQBroker:
 			logger.error(f"❌ RabbitMQ connection error: {e}")
 			raise
 
+	# --- Публикация сообщений ---
 	async def publish_signal(self, signal: dict):
 		"""Отправка торгового сигнала в очередь."""
 		await self._publish(self.queue_signals, signal, "Signal")
@@ -70,6 +71,7 @@ class RabbitMQBroker:
 		except Exception as e:
 			logger.error(f"❌ Failed to publish {label}: {e}")
 
+	# --- Получение сообщений ---
 	async def consume_signals(self, callback):
 		"""Получение сигналов из очереди."""
 		await self._consume(self.queue_signals, callback, "Signal")

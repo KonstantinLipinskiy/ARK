@@ -16,6 +16,7 @@ class User(BaseModel):
 	password_hash: Optional[str] = Field(None, description="Хэш пароля для аутентификации")
 	salt: Optional[str] = Field(None, description="Соль для хэширования пароля")
 	telegram_id: Optional[str] = Field(None, description="Telegram ID для интеграции с ботом")
+	is_admin: bool = Field(default=False, description="Флаг администратора")
 	last_login: Optional[datetime] = Field(None, description="Дата последнего входа")
 	updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Дата последнего обновления")
 	settings: Optional[Dict] = Field(
@@ -34,6 +35,7 @@ class User(BaseModel):
 					"password_hash": "hashed_password_here",
 					"salt": "random_salt_here",
 					"telegram_id": "123456789",
+					"is_admin": True,
 					"last_login": "2026-05-03T12:00:00",
 					"updated_at": "2026-05-03T12:30:00",
 					"settings": {
@@ -50,6 +52,7 @@ class UserCreate(BaseModel):
 	password: str = Field(..., min_length=6, description="Пароль пользователя")
 	role: Literal["admin", "trader"] = Field(default="trader", description="Роль пользователя")
 	telegram_id: Optional[str] = Field(None, description="Telegram ID для интеграции с ботом")
+	is_admin: bool = Field(default=False, description="Флаг администратора")
 	settings: Optional[Dict] = Field(
 		default_factory=dict,
 		description="Настройки пользователя (например, risk_profile, notifications_enabled)"
@@ -63,6 +66,7 @@ class UserCreate(BaseModel):
 					"password": "secure_password",
 					"role": "trader",
 					"telegram_id": "987654321",
+					"is_admin": False,
 					"settings": {
 						"risk_profile": "moderate",
 						"notifications_enabled": False
@@ -94,6 +98,7 @@ class UserOut(BaseModel):
 	last_login: Optional[datetime]
 	updated_at: datetime
 	telegram_id: Optional[str]
+	is_admin: bool
 	settings: Optional[Dict]
 
 	class Config:
@@ -109,6 +114,7 @@ class UserOut(BaseModel):
 					"last_login": "2026-05-07T12:30:00",
 					"updated_at": "2026-05-07T12:45:00",
 					"telegram_id": "123456789",
+					"is_admin": True,
 					"settings": {
 						"risk_profile": "aggressive",
 						"notifications_enabled": True
