@@ -10,12 +10,14 @@ class RabbitMQBroker:
 					queue_signals: str = RABBITMQ_CONFIG["queue_signals"],
 					queue_trades: str = RABBITMQ_CONFIG["queue_trades"],
 					queue_indicators: str = RABBITMQ_CONFIG.get("queue_indicators", "indicators_queue"),
-					queue_telegram: str = RABBITMQ_CONFIG.get("queue_telegram", "telegram_notifications")):
+					queue_telegram: str = RABBITMQ_CONFIG.get("queue_telegram", "telegram_notifications"),
+					queue_backtest: str = RABBITMQ_CONFIG.get("queue_backtest", "backtest_queue")):
 		self.host = host
 		self.queue_signals = queue_signals
 		self.queue_trades = queue_trades
 		self.queue_indicators = queue_indicators
 		self.queue_telegram = queue_telegram
+		self.queue_backtest = queue_backtest
 		self.connection = None
 		self.channel = None
 
@@ -28,6 +30,7 @@ class RabbitMQBroker:
 			await self.channel.declare_queue(self.queue_trades, durable=True)
 			await self.channel.declare_queue(self.queue_indicators, durable=True)
 			await self.channel.declare_queue(self.queue_telegram, durable=True)
+			await self.channel.declare_queue(self.queue_backtest, durable=True)
 			logger.info("✅ RabbitMQ connected and queues declared")
 		except Exception as e:
 			logger.error(f"❌ RabbitMQ connection error: {e}")
@@ -48,6 +51,10 @@ class RabbitMQBroker:
 	async def publish_telegram(self, payload: dict):
 		"""Отправка уведомления в очередь Telegram."""
 		await self._publish(self.queue_telegram, payload, "Telegram notification")
+
+	async def publish_backtest(self, payload: dict):
+		"""Отправка задачи бэктеста в очередь."""
+		await self._publish(self.queue_backtest, payload, "Backtest task")
 
 	async def _publish(self, queue_name: str, payload: dict, label: str):
 		"""Унифицированная публикация сообщений."""
@@ -78,6 +85,10 @@ class RabbitMQBroker:
 	async def consume_telegram(self, callback):
 		"""Получение уведомлений из очереди Telegram."""
 		await self._consume(self.queue_telegram, callback, "Telegram notification")
+
+	async def consume_backtest(self, callback):
+		"""Получение задач бэктеста из очереди."""
+		await self._consume(self.queue_backtest, callback, "Backtest task")
 
 	async def _consume(self, queue_name: str, callback, label: str):
 		"""Унифицированное получение сообщений из очереди."""

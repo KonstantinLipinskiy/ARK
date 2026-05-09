@@ -153,6 +153,39 @@ async def cancel_trade(db: AsyncSession, trade_id: int, reason: str = "Cancelled
 		logger.error(f"Ошибка отмены сделки: {e}")
 		raise
 
+# ---------- Backtest Reports ----------
+async def create_backtest_report(db: AsyncSession, report_data: dict) -> schemas.BacktestReport:
+	"""Создать отчёт бэктеста и сохранить метрики."""
+	try:
+		report = schemas.BacktestReport(
+			symbol=report_data["symbol"],
+			strategy=report_data["strategy"],
+			winrate=report_data["winrate"],
+			avg_profit=report_data["avg_profit"],
+			max_drawdown=report_data["max_drawdown"],
+			sharpe=report_data["sharpe"],
+			user_id=report_data.get("user_id", 1)
+		)
+		db.add(report)
+		await db.commit()
+		await db.refresh(report)
+		return report
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка создания отчёта бэктеста: {e}")
+		raise
+
+async def get_backtest_reports(db: AsyncSession, symbol: str = None, strategy: str = None, user_id: int = None):
+	query = select(schemas.BacktestReport)
+	if symbol:
+		query = query.filter(schemas.BacktestReport.symbol == symbol)
+	if strategy:
+		query = query.filter(schemas.BacktestReport.strategy == strategy)
+	if user_id:
+		query = query.filter(schemas.BacktestReport.user_id == user_id)
+	result = await db.execute(query)
+	return result.scalars().all()
+
 # ---------- Signals ----------
 async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 	try:

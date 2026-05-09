@@ -12,10 +12,11 @@ CACHE_TIMESTAMP = 0
 CACHE_TTL = 300  # 5 минут
 
 async def load_strategies(db: AsyncSession, use_cache: bool = True):
-	"""Загрузить все стратегии из БД и собрать словарь STRATEGY_CONFIG"""
+	"""Загрузить все стратегии из БД и собрать словарь STRATEGY_CONFIG.
+		Поддержка нескольких стратегий на один символ и комбинированных индикаторов.
+	"""
 	global STRATEGY_CONFIG, CACHE_TIMESTAMP
 
-	# Используем кэш, если он актуален
 	if use_cache and STRATEGY_CONFIG and (time.time() - CACHE_TIMESTAMP < CACHE_TTL):
 		return STRATEGY_CONFIG
 
@@ -24,7 +25,12 @@ async def load_strategies(db: AsyncSession, use_cache: bool = True):
 	config = {}
 
 	for s in strategies:
-		config[s.symbol] = {
+		# 🔹 Поддержка нескольких стратегий на один символ
+		if s.symbol not in config:
+			config[s.symbol] = []
+
+		strategy_entry = {
+			"name": s.name or f"strategy_{s.id}",
 			"enabled_indicators": s.enabled_indicators or [],
 			"entry_conditions": s.entry_conditions or [],
 			"ema_short": s.ema_short or 12,
@@ -44,6 +50,8 @@ async def load_strategies(db: AsyncSession, use_cache: bool = True):
 			"allocation_percent": s.allocation_percent or 1.0,
 			"leverage": s.leverage or 1,
 		}
+
+		config[s.symbol].append(strategy_entry)
 
 	STRATEGY_CONFIG = config
 	CACHE_TIMESTAMP = time.time()

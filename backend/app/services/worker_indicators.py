@@ -1,6 +1,7 @@
 # app/workers/worker_indicators.py
 import asyncio
 import json
+import time
 from app.services.indicators_service import IndicatorsService
 from app.db.session import async_session
 from app.cache.redis import RedisCache
@@ -29,6 +30,8 @@ class IndicatorWorker:
 			indicator = message.get("indicator")
 			kwargs = message.get("kwargs", {})
 
+			start_time = time.time()
+
 			if task_type == "indicator":
 					if not pair or not indicator:
 						logger.error(f"❌ Invalid indicator message: {message}")
@@ -37,12 +40,13 @@ class IndicatorWorker:
 					async with async_session() as session:
 						redis = RedisCache()
 						service = IndicatorsService(session, redis)
+						# heavy calc вынесен в отдельный таск
 						await service.calculate_and_store(pair, indicator, **kwargs)
 
-					logger.info(f"✅ Indicator {indicator} for {pair} calculated and stored")
+					elapsed = round(time.time() - start_time, 3)
+					logger.info(f"✅ Indicator {indicator} for {pair} calculated and stored (elapsed {elapsed}s)")
 
 			elif task_type == "ml_train":
-					# сообщение для обучения ML модели
 					trades = message.get("trades", [])
 					model_type = message.get("model_type", "sklearn")
 
@@ -53,7 +57,8 @@ class IndicatorWorker:
 					try:
 						df = self.ml_service.prepare_data(trades)
 						metrics = self.ml_service.train(df, model_type=model_type)
-						logger.info(f"🤖 ML training completed for {pair} ({model_type}): {metrics}")
+						elapsed = round(time.time() - start_time, 3)
+						logger.info(f"🤖 ML training completed for {pair} ({model_type}) in {elapsed}s: {metrics}")
 					except Exception as e:
 						logger.error(f"❌ ML training error: {e}")
 
