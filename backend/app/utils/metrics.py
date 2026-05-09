@@ -104,3 +104,19 @@ def export_ml_metrics(metrics: Dict[str, float]):
 AGENT_REQUESTS = Counter("agent_requests_total", "Количество запросов к агентам")
 AGENT_ERRORS = Counter("agent_errors_total", "Количество ошибок агентов")
 AGENT_LATENCY = Histogram("agent_latency_seconds", "Время ответа агентов")
+
+# --- Report Metrics (Prometheus) ---
+REPORT_SEARCH_ACCURACY = Gauge("report_search_accuracy", "Точность поиска документов для отчётов (% релевантных)")
+REPORT_LATENCY_HISTOGRAM = Histogram("report_latency_seconds", "Распределение времени ответа отчётов")
+
+def export_report_metrics(search_accuracy: float, latency: float):
+	"""
+	Экспорт метрик отчётов в Prometheus.
+	search_accuracy: процент релевантных документов (0.0–1.0)
+	latency: время ответа в секундах
+	"""
+	try:
+		REPORT_SEARCH_ACCURACY.set(search_accuracy)
+		REPORT_LATENCY_HISTOGRAM.observe(latency)
+	except Exception as e:
+		print(f"❌ Ошибка экспорта метрик отчётов: {e}")

@@ -12,7 +12,8 @@ class RabbitMQBroker:
 					queue_indicators: str = RABBITMQ_CONFIG.get("queue_indicators", "indicators_queue"),
 					queue_telegram: str = RABBITMQ_CONFIG.get("queue_telegram", "telegram_notifications"),
 					queue_backtest: str = RABBITMQ_CONFIG.get("queue_backtest", "backtest_queue"),
-					queue_agents: str = RABBITMQ_CONFIG.get("queue_agents", "agents_queue")):
+					queue_agents: str = RABBITMQ_CONFIG.get("queue_agents", "agents_queue"),
+					queue_reports: str = RABBITMQ_CONFIG.get("queue_reports", "reports_queue")):
 		self.host = host
 		self.queue_signals = queue_signals
 		self.queue_trades = queue_trades
@@ -20,6 +21,7 @@ class RabbitMQBroker:
 		self.queue_telegram = queue_telegram
 		self.queue_backtest = queue_backtest
 		self.queue_agents = queue_agents
+		self.queue_reports = queue_reports
 		self.connection = None
 		self.channel = None
 
@@ -34,6 +36,7 @@ class RabbitMQBroker:
 			await self.channel.declare_queue(self.queue_telegram, durable=True)
 			await self.channel.declare_queue(self.queue_backtest, durable=True)
 			await self.channel.declare_queue(self.queue_agents, durable=True)
+			await self.channel.declare_queue(self.queue_reports, durable=True)
 			logger.info("✅ RabbitMQ connected and queues declared")
 		except Exception as e:
 			logger.error(f"❌ RabbitMQ connection error: {e}")
@@ -57,6 +60,9 @@ class RabbitMQBroker:
 
 	async def publish_agent(self, payload: dict):
 		await self._publish(self.queue_agents, payload, "Agent task")
+
+	async def publish_report(self, payload: dict):
+		await self._publish(self.queue_reports, payload, "Report task")
 
 	async def _publish(self, queue_name: str, payload: dict, label: str):
 		try:
@@ -89,6 +95,9 @@ class RabbitMQBroker:
 
 	async def consume_agents(self, callback):
 		await self._consume(self.queue_agents, callback, "Agent task")
+
+	async def consume_reports(self, callback):
+		await self._consume(self.queue_reports, callback, "Report task")
 
 	async def _consume(self, queue_name: str, callback, label: str):
 		try:
