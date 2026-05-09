@@ -1,6 +1,6 @@
 # app/services/agents.py
 from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
+from langchain.llms import OpenAI, HuggingFaceHub
 from app.services.reports import ReportsService
 from app.db.vector import VectorDB
 from app.utils.metrics import calculate_metrics
@@ -8,12 +8,62 @@ from app.config import RISK_CONFIG
 from app.services.orders import OrdersService
 from app.utils.logger import logger
 
+# 🔹 Дополнительно можно подключить локальные модели (пример)
+try:
+	from langchain.llms import LlamaCpp
+except ImportError:
+	LlamaCpp = None
+
 class AgentsService:
-	def __init__(self, llm_provider: str = "openai", temperature: float = 0):
-		# Инициализация LLM (можно переключать провайдер)
+	def __init__(
+		self,
+		llm_provider: str = "openai",
+		temperature: float = 0.0,
+		top_p: float = 1.0,
+		max_tokens: int = 512,
+		model_name: str | None = None
+	):
+		"""
+		Инициализация LLM с гибкостью выбора провайдера.
+		llm_provider: "openai", "huggingface", "llama", "mistral"
+		"""
+		self.llm = None
+
 		if llm_provider == "openai":
-			self.llm = OpenAI(temperature=temperature)
-		# TODO: добавить HuggingFace, LLaMA, Mistral
+			self.llm = OpenAI(
+					temperature=temperature,
+					max_tokens=max_tokens,
+					top_p=top_p
+			)
+		elif llm_provider == "huggingface":
+			# Требует настройки HUGGINGFACEHUB_API_TOKEN
+			self.llm = HuggingFaceHub(
+					repo_id=model_name or "google/flan-t5-large",
+					model_kwargs={
+						"temperature": temperature,
+						"top_p": top_p,
+						"max_length": max_tokens
+					}
+			)
+		elif llm_provider == "llama" and LlamaCpp:
+			self.llm = LlamaCpp(
+					model_path=model_name or "./models/llama-7b.ggmlv3.q4_0.bin",
+					temperature=temperature,
+					top_p=top_p,
+					max_tokens=max_tokens
+			)
+		elif llm_provider == "mistral":
+			# Заглушка: интеграция через HuggingFace
+			self.llm = HuggingFaceHub(
+					repo_id=model_name or "mistralai/Mistral-7B-v0.1",
+					model_kwargs={
+						"temperature": temperature,
+						"top_p": top_p,
+						"max_length": max_tokens
+					}
+			)
+		else:
+			raise ValueError(f"Неизвестный провайдер LLM: {llm_provider}")
 
 		# Инициализация вспомогательных сервисов
 		self.vector = VectorDB()

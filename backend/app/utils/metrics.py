@@ -1,6 +1,6 @@
 from typing import List, Dict, Union
 import math
-from prometheus_client import Gauge
+from prometheus_client import Gauge, Counter, Histogram
 
 # --- Trading Metrics ---
 def _extract_profit(trade: Union[Dict, object]) -> float:
@@ -98,5 +98,9 @@ def export_ml_metrics(metrics: Dict[str, float]):
 		if "loss" in metrics:
 			ml_loss.set(metrics["loss"])
 	except Exception as e:
-		# Логируем, но не прерываем работу
 		print(f"❌ Ошибка экспорта ML метрик: {e}")
+
+# --- Agent Metrics (Prometheus) ---
+AGENT_REQUESTS = Counter("agent_requests_total", "Количество запросов к агентам")
+AGENT_ERRORS = Counter("agent_errors_total", "Количество ошибок агентов")
+AGENT_LATENCY = Histogram("agent_latency_seconds", "Время ответа агентов")

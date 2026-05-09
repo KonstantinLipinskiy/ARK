@@ -11,13 +11,15 @@ class RabbitMQBroker:
 					queue_trades: str = RABBITMQ_CONFIG["queue_trades"],
 					queue_indicators: str = RABBITMQ_CONFIG.get("queue_indicators", "indicators_queue"),
 					queue_telegram: str = RABBITMQ_CONFIG.get("queue_telegram", "telegram_notifications"),
-					queue_backtest: str = RABBITMQ_CONFIG.get("queue_backtest", "backtest_queue")):
+					queue_backtest: str = RABBITMQ_CONFIG.get("queue_backtest", "backtest_queue"),
+					queue_agents: str = RABBITMQ_CONFIG.get("queue_agents", "agents_queue")):
 		self.host = host
 		self.queue_signals = queue_signals
 		self.queue_trades = queue_trades
 		self.queue_indicators = queue_indicators
 		self.queue_telegram = queue_telegram
 		self.queue_backtest = queue_backtest
+		self.queue_agents = queue_agents
 		self.connection = None
 		self.channel = None
 
@@ -31,6 +33,7 @@ class RabbitMQBroker:
 			await self.channel.declare_queue(self.queue_indicators, durable=True)
 			await self.channel.declare_queue(self.queue_telegram, durable=True)
 			await self.channel.declare_queue(self.queue_backtest, durable=True)
+			await self.channel.declare_queue(self.queue_agents, durable=True)
 			logger.info("✅ RabbitMQ connected and queues declared")
 		except Exception as e:
 			logger.error(f"❌ RabbitMQ connection error: {e}")
@@ -38,27 +41,24 @@ class RabbitMQBroker:
 
 	# --- Публикация сообщений ---
 	async def publish_signal(self, signal: dict):
-		"""Отправка торгового сигнала в очередь."""
 		await self._publish(self.queue_signals, signal, "Signal")
 
 	async def publish_trade(self, trade: dict):
-		"""Отправка сделки в очередь."""
 		await self._publish(self.queue_trades, trade, "Trade")
 
 	async def publish_indicator(self, payload: dict):
-		"""Отправка задачи расчёта индикатора в очередь."""
 		await self._publish(self.queue_indicators, payload, "Indicator task")
 
 	async def publish_telegram(self, payload: dict):
-		"""Отправка уведомления в очередь Telegram."""
 		await self._publish(self.queue_telegram, payload, "Telegram notification")
 
 	async def publish_backtest(self, payload: dict):
-		"""Отправка задачи бэктеста в очередь."""
 		await self._publish(self.queue_backtest, payload, "Backtest task")
 
+	async def publish_agent(self, payload: dict):
+		await self._publish(self.queue_agents, payload, "Agent task")
+
 	async def _publish(self, queue_name: str, payload: dict, label: str):
-		"""Унифицированная публикация сообщений."""
 		try:
 			await self.channel.default_exchange.publish(
 					aio_pika.Message(
@@ -73,27 +73,24 @@ class RabbitMQBroker:
 
 	# --- Получение сообщений ---
 	async def consume_signals(self, callback):
-		"""Получение сигналов из очереди."""
 		await self._consume(self.queue_signals, callback, "Signal")
 
 	async def consume_trades(self, callback):
-		"""Получение сделок из очереди."""
 		await self._consume(self.queue_trades, callback, "Trade")
 
 	async def consume_indicators(self, callback):
-		"""Получение задач индикаторов из очереди."""
 		await self._consume(self.queue_indicators, callback, "Indicator task")
 
 	async def consume_telegram(self, callback):
-		"""Получение уведомлений из очереди Telegram."""
 		await self._consume(self.queue_telegram, callback, "Telegram notification")
 
 	async def consume_backtest(self, callback):
-		"""Получение задач бэктеста из очереди."""
 		await self._consume(self.queue_backtest, callback, "Backtest task")
 
+	async def consume_agents(self, callback):
+		await self._consume(self.queue_agents, callback, "Agent task")
+
 	async def _consume(self, queue_name: str, callback, label: str):
-		"""Унифицированное получение сообщений из очереди."""
 		try:
 			queue = await self.channel.declare_queue(queue_name, durable=True)
 			async with queue.iterator() as q:
@@ -108,7 +105,6 @@ class RabbitMQBroker:
 			logger.error(f"❌ Failed to consume {label}: {e}")
 
 	async def close(self):
-		"""Закрывает соединение."""
 		if self.connection:
 			await self.connection.close()
 			logger.info("🔌 RabbitMQ connection closed")
