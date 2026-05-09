@@ -51,6 +51,13 @@ async def process_notification(message: str):
 					f"Recall: {metrics.get('recall', '-')}"
 			)
 
+		elif msg_type == "ml_predict":
+			predictions = payload.get("predictions", [])
+			text = (
+					f"🔮 ML прогноз ({payload.get('model_type', 'sklearn')})\n"
+					f"Результаты: {predictions}"
+			)
+
 		elif msg_type == "error":
 			text = f"❌ Ошибка: {payload.get('error', 'Неизвестная ошибка')}"
 
@@ -76,6 +83,14 @@ async def process_notification(message: str):
 					f"Депозит: {payload.get('deposit', '-')}"
 			)
 
+		elif msg_type == "report":
+			report_name = payload.get("report_name", "Отчёт")
+			summary = payload.get("summary", "")
+			text = (
+					f"📑 Новый отчёт: {report_name}\n"
+					f"{summary}"
+			)
+
 		# --- Отправка пользователю ---
 		if user_id:
 			user = await get_user_by_id(user_id)
@@ -84,6 +99,7 @@ async def process_notification(message: str):
 						logger.info(f"🔕 Уведомления отключены для пользователя {user.username}")
 						return
 					await bot.send_message(chat_id=user.telegram_id, text=text)
+					logger.info(f"📤 Уведомление отправлено пользователю {user.username} ({user.telegram_id})")
 			else:
 					logger.warning(f"❌ Пользователь {user_id} не найден или нет telegram_id")
 		else:
@@ -91,6 +107,7 @@ async def process_notification(message: str):
 			default_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 			if default_chat_id:
 					await bot.send_message(chat_id=default_chat_id, text=text)
+					logger.info(f"📤 Уведомление отправлено в общий чат {default_chat_id}")
 
 	except Exception as e:
 		logger.error(f"❌ Ошибка отправки в Telegram: {e}")

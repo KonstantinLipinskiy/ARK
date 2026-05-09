@@ -44,66 +44,84 @@ class IndicatorsService:
 			logger.error(f"❌ Error in IndicatorsService.calculate_and_store: {e} | Параметры: {kwargs}")
 			return None
 
-	async def _save_to_db(self, pair: str, indicator_name: str, result):
+	async def _save_to_db(self, pair: str, indicator_name: str, result, retries: int = 2):
 		"""
 		Сохраняет рассчитанный индикатор в таблицу indicators.
+		Добавлен retry при временных ошибках.
 		"""
-		try:
-			if isinstance(result, tuple):
-					values = []
-					for idx, res in enumerate(result):
-						val = res.iloc[-1] if isinstance(res, pd.Series) else str(res)
+		attempt = 0
+		while attempt <= retries:
+			try:
+					if isinstance(result, tuple):
+						values = []
+						for idx, res in enumerate(result):
+							val = res.iloc[-1] if isinstance(res, pd.Series) else str(res)
+							indicator = IndicatorORM(
+									pair=pair,
+									name=f"{indicator_name}_{idx}",
+									value=str(val)
+							)
+							self.db_session.add(indicator)
+							values.append(val)
+						await self.db_session.commit()
+						logger.info(f"✅ DB save: {indicator_name} → {values}")
+					else:
+						value = result.iloc[-1] if isinstance(result, pd.Series) else str(result)
 						indicator = IndicatorORM(
 							pair=pair,
-							name=f"{indicator_name}_{idx}",
-							value=str(val)
+							name=indicator_name,
+							value=str(value)
 						)
 						self.db_session.add(indicator)
-						values.append(val)
-					await self.db_session.commit()
-					logger.info(f"✅ DB save: {indicator_name} → {values}")
-			else:
-					value = result.iloc[-1] if isinstance(result, pd.Series) else str(result)
-					indicator = IndicatorORM(
-						pair=pair,
-						name=indicator_name,
-						value=str(value)
-					)
-					self.db_session.add(indicator)
-					await self.db_session.commit()
-					logger.info(f"✅ DB save: {indicator_name} → {value}")
-		except Exception as e:
-			logger.error(f"❌ DB save error: {e}")
-			await self.db_session.rollback()
+						await self.db_session.commit()
+						logger.info(f"✅ DB save: {indicator_name} → {value}")
+					return
+			except Exception as e:
+					logger.error(f"❌ DB save error (attempt {attempt+1}): {e}")
+					await self.db_session.rollback()
+					attempt += 1
+					if attempt > retries:
+						logger.error(f"❌ DB save failed after {retries+1} attempts for {indicator_name}")
+						return
+					await asyncio.sleep(1)  # небольшая пауза перед повтором
 
-	async def _publish_to_redis(self, pair: str, indicator_name: str, result):
+	async def _publish_to_redis(self, pair: str, indicator_name: str, result, retries: int = 2):
 		"""
 		Публикует результат в Redis канал indicators.
+		Добавлен retry при временных ошибках.
 		"""
-		try:
-			if isinstance(result, tuple):
-					payload = {
-						"pair": pair,
-						"indicator": indicator_name,
-						"result": [
-							res.tail(1).to_dict() if isinstance(res, pd.Series) else str(res)
-							for res in result
-						]
-					}
-			else:
-					payload = {
-						"pair": pair,
-						"indicator": indicator_name,
-						"result": (
-							result.tail(1).to_dict()
-							if isinstance(result, pd.Series)
-							else str(result)
-						)
-					}
-			await self.redis.publish("indicators", payload)
-			logger.info(f"✅ Redis publish: {indicator_name} → {payload}")
-		except Exception as e:
-			logger.error(f"❌ Redis publish error: {e}")
+		attempt = 0
+		while attempt <= retries:
+			try:
+					if isinstance(result, tuple):
+						payload = {
+							"pair": pair,
+							"indicator": indicator_name,
+							"result": [
+									res.tail(1).to_dict() if isinstance(res, pd.Series) else str(res)
+									for res in result
+							]
+						}
+					else:
+						payload = {
+							"pair": pair,
+							"indicator": indicator_name,
+							"result": (
+									result.tail(1).to_dict()
+									if isinstance(result, pd.Series)
+									else str(result)
+							)
+						}
+					await self.redis.publish("indicators", payload)
+					logger.info(f"✅ Redis publish: {indicator_name} → {payload}")
+					return
+			except Exception as e:
+					logger.error(f"❌ Redis publish error (attempt {attempt+1}): {e}")
+					attempt += 1
+					if attempt > retries:
+						logger.error(f"❌ Redis publish failed after {retries+1} attempts for {indicator_name}")
+						return
+					await asyncio.sleep(1)
 
 	def _validate_inputs(self, kwargs: dict):
 		"""
