@@ -85,7 +85,10 @@
       {
         "type": "table",
         "title": "Recent Trades",
-        "targets": [{ "expr": "bot_recent_trades" }]
+        "targets": [
+          { "expr": "bot_recent_trades{symbol=~\"$symbol\",user_id=~\"$user_id\",strategy=~\"$strategy\"}" }
+        ],
+        "columns": ["trade_id", "symbol", "profit", "status", "user_id", "strategy"]
       },
       {
         "type": "graph",
@@ -131,6 +134,31 @@
         "type": "graph",
         "title": "Redis Errors",
         "targets": [{ "expr": "redis_errors_total" }]
+      },
+      {
+        "type": "graph",
+        "title": "Indicator Tasks Total",
+        "targets": [{ "expr": "indicators_tasks_total" }]
+      },
+      {
+        "type": "graph",
+        "title": "Indicator Task Duration",
+        "targets": [{ "expr": "indicators_task_duration_seconds" }]
+      },
+      {
+        "type": "graph",
+        "title": "Indicator Queue Time",
+        "targets": [{ "expr": "indicators_queue_time_seconds" }]
+      },
+      {
+        "type": "graph",
+        "title": "Indicator Task Errors",
+        "targets": [{ "expr": "indicators_tasks_errors_total" }]
+      },
+      {
+        "type": "graph",
+        "title": "Bot Errors",
+        "targets": [{ "expr": "bot_errors_total" }]
       }
     ],
     "templating": {

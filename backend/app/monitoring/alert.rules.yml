@@ -1,0 +1,96 @@
+groups:
+  - name: ark_bot_alerts
+    rules:
+      # --- Торговые метрики ---
+      - alert: LowWinrate
+        expr: bot_winrate < 0.4
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Winrate ниже 40%"
+          description: "Winrate упал ниже 40% за последние 5 минут."
+
+      - alert: HighDrawdown
+        expr: bot_max_drawdown > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Просадка выше 100"
+          description: "Максимальная просадка превысила 100 единиц."
+
+      - alert: ManyErrors
+        expr: bot_errors_total > 10
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Слишком много ошибок"
+          description: "Количество ошибок превысило 10 за последние 10 минут."
+
+      - alert: NegativeProfit
+        expr: bot_total_profit < 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Отрицательный профит"
+          description: "Суммарный профит стал отрицательным."
+
+      # --- Метрики RabbitMQ ---
+      - alert: RabbitMQHighErrors
+        expr: rabbitmq_errors_total > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ошибки RabbitMQ"
+          description: "Количество ошибок RabbitMQ превысило 5 за последние 5 минут."
+
+      - alert: RabbitMQSlowProcessing
+        expr: rabbitmq_processing_time_seconds > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Медленная обработка сообщений"
+          description: "Среднее время обработки сообщений RabbitMQ превысило 2 секунды."
+
+      # --- Метрики Redis ---
+      - alert: RedisHighLatency
+        expr: redis_latency_seconds > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокая задержка Redis"
+          description: "Задержка Redis превысила 0.5 секунд."
+
+      - alert: RedisNoKeys
+        expr: redis_keys_total == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis пустой"
+          description: "В Redis нет ключей — возможна проблема с кэшем."
+
+      # --- Метрики индикаторов ---
+      - alert: IndicatorErrors
+        expr: indicators_tasks_errors_total > 5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ошибки индикаторов"
+          description: "Количество ошибок при расчёте индикаторов превысило 5 за последние 10 минут."
+
+      - alert: IndicatorQueueOverload
+        expr: indicators_tasks_total > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Очередь индикаторов перегружена"
+          description: "Количество задач индикаторов превысило 100."
