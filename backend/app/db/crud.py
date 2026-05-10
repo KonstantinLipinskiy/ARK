@@ -396,9 +396,34 @@ async def get_user_by_email(db: AsyncSession, email: str):
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.email == email))
 	return result.scalars().first()
 
-async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100):
-	result = await db.execute(select(schemas.UserORM).offset(skip).limit(limit))
-	return result.scalars().all()
+async def get_users(
+	db: AsyncSession,
+	skip: int = 0,
+	limit: int = 100,
+	username: str = None,
+	role: str = None
+):
+	query = select(schemas.UserORM)
+	if username:
+		query = query.filter(schemas.UserORM.username.ilike(f"%{username}%"))
+	if role:
+		query = query.filter(schemas.UserORM.role == role)
+
+	# Подсчёт общего количества пользователей
+	total_count = await db.scalar(
+		select(func.count()).select_from(query.subquery())
+	)
+
+	result = await db.execute(query.offset(skip).limit(limit))
+	users = result.scalars().all()
+
+	return {
+		"items": users,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}
+
 
 async def update_user_status(db: AsyncSession, user_id: int, status: str):
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.id == user_id))
