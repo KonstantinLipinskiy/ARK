@@ -599,3 +599,58 @@ async def delete_strategy(db: AsyncSession, symbol: str):
 		await db.rollback()
 		logger.error(f"Ошибка удаления стратегии: {e}")
 		raise
+
+
+# ---------- Refresh Tokens ----------
+async def create_refresh_token(db: AsyncSession, user_id: int, token: str, expires_at: datetime) -> schemas.RefreshTokenORM:
+	"""Сохранить refresh токен в БД."""
+	try:
+		db_token = schemas.RefreshTokenORM(
+			user_id=user_id,
+			token=token,
+			expires_at=expires_at
+		)
+		db.add(db_token)
+		await db.commit()
+		await db.refresh(db_token)
+		return db_token
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка сохранения refresh токена: {e}")
+		raise
+
+async def get_refresh_token(db: AsyncSession, token: str) -> schemas.RefreshTokenORM | None:
+	"""Получить refresh токен по строке токена."""
+	result = await db.execute(select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.token == token))
+	return result.scalars().first()
+
+async def delete_refresh_token(db: AsyncSession, token: str) -> bool:
+	"""Удалить refresh токен по строке токена."""
+	result = await db.execute(select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.token == token))
+	db_token = result.scalars().first()
+	if not db_token:
+		return False
+	await db.delete(db_token)
+	try:
+		await db.commit()
+		return True
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка удаления refresh токена: {e}")
+		raise
+
+async def delete_tokens_by_user(db: AsyncSession, user_id: int) -> bool:
+	"""Удалить все refresh токены пользователя (например, при logout)."""
+	result = await db.execute(select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.user_id == user_id))
+	tokens = result.scalars().all()
+	if not tokens:
+		return False
+	for t in tokens:
+		await db.delete(t)
+	try:
+		await db.commit()
+		return True
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка удаления refresh токенов пользователя: {e}")
+		raise

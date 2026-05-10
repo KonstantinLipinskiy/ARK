@@ -21,15 +21,35 @@ def verify_password(password: str, salt: str, stored_hash: str) -> bool:
 	"""
 	return hashlib.sha256((password + salt).encode()).hexdigest() == stored_hash
 
-# 🔹 Создание JWT токена
-def create_jwt_token(data: dict, expires_delta: int = settings.JWT_EXPIRE_MINUTES) -> str:
+# 🔹 Создание JWT access токена
+def create_access_token(data: dict, expires_minutes: int = settings.JWT_EXPIRE_MINUTES) -> str:
 	"""
-	Создаёт JWT токен.
+	Создаёт JWT access токен.
 	data — словарь с данными (например, user_id, role).
-	expires_delta — время жизни токена в минутах.
+	expires_minutes — время жизни токена в минутах.
 	"""
 	payload = data.copy()
-	payload.update({"exp": datetime.utcnow() + timedelta(minutes=expires_delta)})
+	expire = datetime.utcnow() + timedelta(minutes=expires_minutes)
+	payload.update({
+		"exp": expire,
+		"token_type": "access"
+	})
+	token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+	return token
+
+# 🔹 Создание JWT refresh токена
+def create_refresh_token(data: dict, expires_days: int = settings.JWT_REFRESH_DAYS) -> str:
+	"""
+	Создаёт JWT refresh токен.
+	data — словарь с данными (например, user_id, role).
+	expires_days — время жизни токена в днях.
+	"""
+	payload = data.copy()
+	expire = datetime.utcnow() + timedelta(days=expires_days)
+	payload.update({
+		"exp": expire,
+		"token_type": "refresh"
+	})
 	token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 	return token
 

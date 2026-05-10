@@ -6,7 +6,7 @@ from app.utils.security import decode_jwt_token
 class JWTMiddleware(BaseHTTPMiddleware):
 	"""
 	Middleware для проверки JWT токена.
-	Добавляет user_id и role в request.state, если токен валиден.
+	Добавляет user_id, role и token_type в request.state, если токен валиден.
 	"""
 
 	def __init__(self, app):
@@ -23,9 +23,18 @@ class JWTMiddleware(BaseHTTPMiddleware):
 					if not payload:
 						raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+					# Проверка типа токена
+					token_type = payload.get("token_type")
+					if token_type != "access":
+						raise HTTPException(status_code=401, detail="Invalid token type")
+
 					# Добавляем user_id и role в request.state
 					request.state.user_id = payload.get("user_id")
 					request.state.role = payload.get("role")
+
+					# Дополнительно можно проверять статус пользователя, если он включён в payload
+					if payload.get("status") and payload.get("status") != "active":
+						raise HTTPException(status_code=403, detail="User is blocked")
 
 			except HTTPException as e:
 					raise e

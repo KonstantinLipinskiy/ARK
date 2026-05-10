@@ -2,17 +2,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from datetime import timedelta
+from datetime import datetime, timedelta
 from app.db.session import get_db
 from app.db.schemas import UserORM
 from app.models.user import UserCreate, UserLogin, UserOut
 from app.utils.security import (
 	hash_password,
 	verify_password,
-	create_jwt_token,
+	create_access_token,
+	create_refresh_token,
 	decode_jwt_token
 )
 from app.utils.logger import logger
+from app.db import crud
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,14 +58,23 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
 		logger.error(f"❌ Ошибка входа: неверные данные для {credentials.email}")
 		raise HTTPException(status_code=401, detail="Invalid credentials")
 
-	access_token = create_jwt_token(
+	# Проверка статуса пользователя
+	if user.status != "active":
+		logger.warning(f"⛔ Попытка входа заблокированного пользователя: {user.email}")
+		raise HTTPException(status_code=403, detail="User is blocked")
+
+	access_token = create_access_token(
 		{"user_id": user.id, "role": user.role},
-		expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+		expires_minutes=ACCESS_TOKEN_EXPIRE_MINUTES
 	)
-	refresh_token = create_jwt_token(
+	refresh_token = create_refresh_token(
 		{"user_id": user.id, "role": user.role},
-		expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+		expires_days=REFRESH_TOKEN_EXPIRE_DAYS
 	)
+
+	# Сохраняем refresh токен в БД
+	expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+	await crud.create_refresh_token(db, user.id, refresh_token, expires_at)
 
 	logger.info(f"🔑 Пользователь вошёл: {user.username} ({user.role})")
 	return {
@@ -74,15 +85,21 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
 
 # 🔹 Обновление токена (refresh)
 @router.post("/refresh")
-async def refresh_token(refresh_token: str):
+async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
 	payload = decode_jwt_token(refresh_token)
 	if not payload:
-		logger.error("❌ Refresh токен недействителен или истёк")
+		logger.warning("❌ Попытка обновления с недействительным refresh токеном")
 		raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
-	new_access_token = create_jwt_token(
+	# Проверяем, что токен есть в БД
+	db_token = await crud.get_refresh_token(db, refresh_token)
+	if not db_token or db_token.expires_at < datetime.utcnow():
+		logger.warning("❌ Refresh токен отсутствует в БД или истёк")
+		raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+	new_access_token = create_access_token(
 		{"user_id": payload.get("user_id"), "role": payload.get("role")},
-		expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+		expires_minutes=ACCESS_TOKEN_EXPIRE_MINUTES
 	)
 
 	logger.info(f"♻️ Обновлён access токен для user_id={payload.get('user_id')}")
@@ -90,3 +107,13 @@ async def refresh_token(refresh_token: str):
 		"access_token": new_access_token,
 		"token_type": "bearer"
 	}
+
+# 🔹 Logout / revoke токенов
+@router.post("/logout")
+async def logout(user_id: int, db: AsyncSession = Depends(get_db)):
+	success = await crud.delete_tokens_by_user(db, user_id)
+	if not success:
+		logger.warning(f"⚠️ Попытка logout: токены пользователя {user_id} не найдены")
+		raise HTTPException(status_code=404, detail="No refresh tokens found for user")
+	logger.info(f"🚪 Пользователь {user_id} вышел, refresh токены удалены")
+	return {"detail": "User logged out, refresh tokens revoked"}

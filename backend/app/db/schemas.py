@@ -211,3 +211,17 @@ class IndicatorORM(Base):
 	name = Column(String(50), nullable=False, index=True)
 	value = Column(String(255), nullable=False)
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
+
+
+# --- Таблица refresh токенов ---
+class RefreshTokenORM(Base):
+	__tablename__ = "refresh_tokens"
+
+	id = Column(Integer, primary_key=True, index=True)
+	token = Column(String(512), unique=True, nullable=False, index=True)
+	created_at = Column(DateTime, server_default=func.now())
+	expires_at = Column(DateTime, nullable=False)
+
+	# связь с пользователем
+	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	user = relationship("UserORM", back_populates="refresh_tokens")
