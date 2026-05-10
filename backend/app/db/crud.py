@@ -11,6 +11,8 @@ from app.models.user import User, UserCreate
 from app.utils.logger import logger
 from app.config import settings
 from app.utils.security import hash_password
+from datetime import datetime
+
 
 # ---------- Trades ----------
 async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
@@ -50,7 +52,15 @@ async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
 		logger.error(f"Ошибка БД при создании сделки: {e}")
 		raise
 
-async def get_trades(db: AsyncSession, skip: int = 0, limit: int = 100, symbol: str = None, status: str = None):
+async def get_trades(
+	db: AsyncSession,
+	skip: int = 0,
+	limit: int = 100,
+	symbol: str = None,
+	status: str = None,
+	date_from: datetime = None,
+	date_to: datetime = None
+):
 	query = select(schemas.TradeORM).options(
 		selectinload(schemas.TradeORM.signal),
 		selectinload(schemas.TradeORM.user)
@@ -59,8 +69,24 @@ async def get_trades(db: AsyncSession, skip: int = 0, limit: int = 100, symbol: 
 		query = query.filter(schemas.TradeORM.symbol == symbol)
 	if status:
 		query = query.filter(schemas.TradeORM.status == status)
+	if date_from:
+		query = query.filter(schemas.TradeORM.timestamp >= date_from)
+	if date_to:
+		query = query.filter(schemas.TradeORM.timestamp <= date_to)
+
+	total_count = await db.scalar(
+		select(func.count()).select_from(query.subquery())
+	)
+
 	result = await db.execute(query.offset(skip).limit(limit))
-	return result.scalars().all()
+	trades = result.scalars().all()
+
+	return {
+		"items": trades,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}
 
 async def get_trades_by_user(db: AsyncSession, user_id: int):
 	result = await db.execute(
@@ -101,6 +127,36 @@ async def update_trade(db: AsyncSession, trade_id: int, updates: dict):
 	except SQLAlchemyError as e:
 		await db.rollback()
 		logger.error(f"Ошибка обновления сделки: {e}")
+		raise
+
+async def patch_trade(db: AsyncSession, trade_id: int, updates: dict):
+	"""Частичное обновление сделки (PATCH)."""
+	result = await db.execute(select(schemas.TradeORM).filter(schemas.TradeORM.id == trade_id))
+	db_trade = result.scalars().first()
+	if not db_trade:
+		return None
+
+	allowed_fields = {
+		"symbol", "side", "amount", "price", "status",
+		"entry_price", "exit_price", "profit_loss", "leverage",
+		"signal_id", "user_id", "exchange_order_id",
+		"stop_loss", "take_profit", "confidence_score", "risk_reason"
+	}
+	for key, value in updates.items():
+		if key in allowed_fields and value is not None:
+			setattr(db_trade, key, value)
+
+	if "status" in updates and updates["status"] == "closed":
+		if db_trade.entry_price and db_trade.exit_price:
+			db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
+
+	try:
+		await db.commit()
+		await db.refresh(db_trade)
+		return db_trade
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка PATCH обновления сделки: {e}")
 		raise
 
 async def delete_trade(db: AsyncSession, trade_id: int):
@@ -152,6 +208,7 @@ async def cancel_trade(db: AsyncSession, trade_id: int, reason: str = "Cancelled
 		await db.rollback()
 		logger.error(f"Ошибка отмены сделки: {e}")
 		raise
+
 
 # ---------- Backtest Reports ----------
 async def create_backtest_report(db: AsyncSession, report_data: dict) -> schemas.BacktestReport:

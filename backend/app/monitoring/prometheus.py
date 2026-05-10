@@ -5,7 +5,7 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 from prometheus_client import Gauge, Counter, Histogram, generate_latest
 from app.db.session import get_db
-from app.db.schemas import TradeORM, SignalORM
+from app.db.schemas import TradeORM, SignalORM, TradeStatus
 from app.utils.metrics import calculate_metrics, ml_accuracy, ml_loss
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
@@ -22,6 +22,11 @@ sortino_gauge = Gauge("bot_sortino_ratio", "Sortino ratio of trades")
 profit_factor_gauge = Gauge("bot_profit_factor", "Profit factor of trades")
 errors_counter = Counter("bot_errors_total", "Number of failed orders")
 active_signals_gauge = Gauge("bot_active_signals", "Number of active signals")
+
+# 🔹 Метрики Prometheus (сделки)
+trades_created_total = Counter("trades_created_total", "Total number of trades created")
+trades_closed_total = Counter("trades_closed_total", "Total number of trades closed")
+trades_cancelled_total = Counter("trades_cancelled_total", "Total number of trades cancelled")
 
 # 🔹 Метрики Prometheus (сигналы)
 signals_created_total = Counter("signals_created_total", "Total number of signals created")
@@ -54,6 +59,20 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	sortino_gauge.set(stats["sortino_ratio"])
 	profit_factor_gauge.set(stats["profit_factor"])
 
+	# --- Метрики сделок ---
+	total_trades = await db.scalar(select(func.count()).select_from(TradeORM))
+	trades_created_total.inc(total_trades or 0)
+
+	closed_trades = await db.scalar(
+		select(func.count()).select_from(TradeORM).filter(TradeORM.status == TradeStatus.closed)
+	)
+	trades_closed_total.inc(closed_trades or 0)
+
+	cancelled_trades = await db.scalar(
+		select(func.count()).select_from(TradeORM).filter(TradeORM.status == TradeStatus.cancelled)
+	)
+	trades_cancelled_total.inc(cancelled_trades or 0)
+
 	# Количество активных сигналов
 	active_signals = await db.scalar(
 		select(func.count()).select_from(SignalORM).filter(SignalORM.status == "active")
@@ -64,7 +83,6 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	total_signals = await db.scalar(select(func.count()).select_from(SignalORM))
 	signals_created_total.inc(total_signals or 0)
 
-	# Считаем количество слабых сигналов (confidence < 0.6)
 	weak_signals = await db.scalar(
 		select(func.count()).select_from(SignalORM).filter(SignalORM.confidence < 0.6)
 	)
@@ -72,7 +90,6 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 
 	# --- Метрики ML обучения ---
 	# ml_accuracy и ml_loss обновляются при обучении через utils/metrics.py
-	# Здесь они просто публикуются в Prometheus
 
 	# --- Метрики RabbitMQ ---
 	broker = RabbitMQBroker()
@@ -98,7 +115,6 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		if pong:
 			redis_latency_seconds.observe(elapsed)
 	except Exception:
-		# Если Redis недоступен, просто логируем ошибку
 		redis_keys_total.set(0)
 
 	return Response(generate_latest(), media_type="text/plain")

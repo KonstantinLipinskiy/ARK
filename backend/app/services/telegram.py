@@ -37,22 +37,23 @@ class TelegramService:
 		await self.bot.send_message(chat_id=telegram_id, text=text)
 
 	async def send_trade_notification(self, trade: dict, user_id: int | None = None):
-		"""Уведомление о сделке."""
+		"""Уведомление о сделке с расширенным форматом (PnL, SL, TP)."""
 		async with get_session() as session:
 			if user_id:
 					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
 					user = result.scalars().first()
 					if user:
 						msg = (
-							f"📊 Сделка по {trade.get('pair', 'N/A')}\n"
+							f"💹 Сделка: {trade.get('symbol', 'N/A')} {trade.get('side', '-')}\n"
 							f"Статус: {trade.get('status', '-')}\n"
-							f"Вход: {trade.get('entry', '-')}\n"
+							f"Вход: {trade.get('entry_price', '-')}\n"
+							f"Выход: {trade.get('exit_price', '-')}\n"
+							f"PnL: {trade.get('profit_loss', '-')}\n"
 							f"Стоп-лосс: {trade.get('stop_loss', '-')}\n"
 							f"Тейк-профит: {trade.get('take_profit', '-')}\n"
-							f"Выход: {trade.get('exit', '-')}\n"
 							f"Leverage: {trade.get('leverage', '-')}\n"
 							f"Confidence: {trade.get('confidence_score', '-')}\n"
-							f"Рассчитанный риск: {trade.get('risk', '-')}"
+							f"Риск: {trade.get('risk_reason', '-')}"
 						)
 						await self.send_message_to_user(user, msg)
 						logger.info(f"📤 Уведомление о сделке отправлено пользователю {user.username}")
@@ -222,3 +223,4 @@ async def risk_command(message: types.Message):
 			f"Strength Multiplier: {limits.get('strength_multiplier', '-')}"
 		)
 		await message.answer(msg)
+

@@ -42,15 +42,40 @@ class TradeORM(Base):
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	status = Column(Enum(TradeStatus), default=TradeStatus.open)
 
-	# 🔹 новое поле для синхронизации с биржей
 	exchange_order_id = Column(String(50), unique=True, index=True)
 
-	# связи
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="trades")
 
 	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
 	signal = relationship("SignalORM", back_populates="trades")
+
+
+# --- Таблица тестовых сделок (бэктесты) ---
+class BacktestTradeORM(Base):
+	__tablename__ = "backtest_trades"
+
+	id = Column(Integer, primary_key=True, index=True)
+	symbol = Column(String(20), nullable=False, index=True)
+	side = Column(String(10), nullable=False)   # buy/sell
+	amount = Column(Float, nullable=False)
+	entry_price = Column(Float, nullable=False)
+	exit_price = Column(Float, nullable=True)
+	profit_loss = Column(Float, nullable=True)
+	leverage = Column(Float, default=1.0)
+	stop_loss = Column(Float, nullable=True)
+	take_profit = Column(Float, nullable=True)
+	confidence_score = Column(Float, nullable=True)
+	timestamp = Column(DateTime, server_default=func.now(), index=True)
+	status = Column(Enum(TradeStatus), default=TradeStatus.open)
+
+	# связь с пользователем
+	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	user = relationship("UserORM", back_populates="backtest_trades")
+
+	# связь с сигналом
+	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
+	signal = relationship("SignalORM")
 
 
 # --- Таблица сигналов ---
@@ -61,12 +86,11 @@ class SignalORM(Base):
 	symbol = Column(String(20), nullable=False, index=True)
 	indicator = Column(String(50), nullable=False)
 	strength = Column(Float, nullable=False)
-	confidence = Column(Float)                  # доверие к сигналу
-	source = Column(String(50))                 # стратегия или внешний сервис
+	confidence = Column(Float)
+	source = Column(String(50))
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	direction = Column(Enum(SignalDirection), nullable=False)
 
-	# связи
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="signals")
 
@@ -83,28 +107,22 @@ class UserORM(Base):
 	role = Column(Enum(UserRole), default=UserRole.trader, nullable=False)
 	status = Column(Enum(UserStatus), default=UserStatus.active, nullable=False, index=True)
 
-	# 🔹 поля для аутентификации
 	password_hash = Column(String(255), nullable=False)
 	salt = Column(String(255), nullable=False)
 
-	# 🔹 интеграция
 	telegram_id = Column(String(50), unique=True, index=True)
-
-	# 🔹 права доступа
 	is_admin = Column(Boolean, default=False, nullable=False)
 
-	# 🔹 метаданные
 	created_at = Column(DateTime, server_default=func.now())
 	last_login = Column(DateTime, nullable=True)
 	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-	# 🔹 настройки пользователя
 	settings = Column(JSON, default={})
 
-	# связи
 	trades = relationship("TradeORM", back_populates="user", cascade="all, delete-orphan")
 	signals = relationship("SignalORM", back_populates="user", cascade="all, delete-orphan")
 	backtest_reports = relationship("BacktestReport", back_populates="user", cascade="all, delete-orphan")
+	backtest_trades = relationship("BacktestTradeORM", back_populates="user", cascade="all, delete-orphan")
 
 
 # --- Таблица логов риск-менеджмента ---
@@ -112,11 +130,11 @@ class RiskLog(Base):
 	__tablename__ = "risk_logs"
 
 	id = Column(Integer, primary_key=True, index=True)
-	reason = Column(String(255), nullable=False)              # причина нарушения
-	symbol = Column(String(20), nullable=True)                # символ сделки
-	position_size = Column(Float, nullable=True)              # размер позиции
-	deposit = Column(Float, nullable=True)                    # депозит
-	timestamp = Column(DateTime, server_default=func.now())   # когда произошло
+	reason = Column(String(255), nullable=False)
+	symbol = Column(String(20), nullable=True)
+	position_size = Column(Float, nullable=True)
+	deposit = Column(Float, nullable=True)
+	timestamp = Column(DateTime, server_default=func.now())
 
 
 # --- Таблица отчётов бэктеста ---
@@ -124,15 +142,14 @@ class BacktestReport(Base):
 	__tablename__ = "backtest_reports"
 
 	id = Column(Integer, primary_key=True, index=True)
-	symbol = Column(String(20), nullable=False, index=True)          # пара (BTC/USDT)
-	strategy = Column(String(50), nullable=False, index=True)        # название стратегии (EMA+RSI)
-	winrate = Column(Float, nullable=False)                          # винрейт %
-	avg_profit = Column(Float, nullable=False)                       # средний профит
-	max_drawdown = Column(Float, nullable=False)                     # максимальная просадка
-	sharpe = Column(Float, nullable=False)                           # Sharpe ratio
-	created_at = Column(DateTime, server_default=func.now())         # дата запуска бэктеста
+	symbol = Column(String(20), nullable=False, index=True)
+	strategy = Column(String(50), nullable=False, index=True)
+	winrate = Column(Float, nullable=False)
+	avg_profit = Column(Float, nullable=False)
+	max_drawdown = Column(Float, nullable=False)
+	sharpe = Column(Float, nullable=False)
+	created_at = Column(DateTime, server_default=func.now())
 
-	# связь с пользователем
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="backtest_reports")
 
@@ -142,11 +159,10 @@ class StrategyORM(Base):
 	__tablename__ = "strategies"
 
 	id = Column(Integer, primary_key=True, index=True)
-	symbol = Column(String, nullable=False)              # BTC/USDT, ETH/USDT
-	enabled_indicators = Column(JSON, nullable=False)    # ["EMA", "RSI", "ATR"]
-	entry_conditions = Column(JSON, nullable=True)       # [["EMA", "RSI"], ["MACD"]]
+	symbol = Column(String, nullable=False)
+	enabled_indicators = Column(JSON, nullable=False)
+	entry_conditions = Column(JSON, nullable=True)
 
-	# параметры индикаторов
 	ema_short = Column(Integer, nullable=True)
 	ema_long = Column(Integer, nullable=True)
 	rsi_period = Column(Integer, nullable=True)
@@ -157,18 +173,15 @@ class StrategyORM(Base):
 	stochastic_period = Column(Integer, nullable=True)
 	bollinger_period = Column(Integer, nullable=True)
 
-	# риск-менеджмент
 	stop_loss = Column(Float, nullable=False)
-	take_profit_targets = Column(JSON, nullable=False)   # [0.02, 0.04, 0.06]
+	take_profit_targets = Column(JSON, nullable=False)
 	take_profit_distribution = Column(JSON, nullable=True)
 	trailing_stop = Column(Boolean, default=False)
 	trailing_mode = Column(String, default="step")
 
-	# аллокация и плечо
 	allocation_percent = Column(Float, nullable=False)
 	leverage = Column(Integer, default=1)
 
-	# 🔹 новый параметр влияния силы сигнала
 	strength_multiplier = Column(Float, nullable=False, default=1.0)
 
 
@@ -177,19 +190,15 @@ class RiskSettingsORM(Base):
 	__tablename__ = "risk_settings"
 
 	id = Column(Integer, primary_key=True, index=True)
-
-	# 🔹 Основные лимиты
 	max_risk_per_trade = Column(Float, nullable=False, default=0.01)
 	max_open_trades = Column(Integer, nullable=False, default=5)
 	max_daily_loss = Column(Float, nullable=False, default=0.05)
 	max_leverage = Column(Integer, nullable=False, default=3)
 
-	# 🔹 Дополнительные параметры
 	cooldown_between_trades = Column(Integer, nullable=False, default=60)
 	risk_reward_ratio = Column(Float, nullable=False, default=1.5)
 	dynamic_allocation = Column(Boolean, nullable=False, default=False)
 
-	# 🔹 Метаданные
 	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
@@ -198,7 +207,7 @@ class IndicatorORM(Base):
 	__tablename__ = "indicators"
 
 	id = Column(Integer, primary_key=True, index=True)
-	pair = Column(String(20), nullable=False, index=True)       # например BTC/USDT
-	name = Column(String(50), nullable=False, index=True)       # EMA, RSI, MACD
-	value = Column(String(255), nullable=False)                 # последнее рассчитанное значение
+	pair = Column(String(20), nullable=False, index=True)
+	name = Column(String(50), nullable=False, index=True)
+	value = Column(String(255), nullable=False)
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
