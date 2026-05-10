@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.db.schemas import TradeORM, SignalORM
 from app.utils.metrics import calculate_metrics, ml_accuracy, ml_loss
 from app.broker.rabbitmq import RabbitMQBroker
+from app.cache.redis import RedisCache
 
 router = APIRouter()
 
@@ -27,6 +28,10 @@ rabbitmq_messages_published = Counter("rabbitmq_messages_published_total", "Tota
 rabbitmq_messages_consumed = Counter("rabbitmq_messages_consumed_total", "Total messages consumed from RabbitMQ")
 rabbitmq_errors_total = Counter("rabbitmq_errors_total", "Total RabbitMQ errors")
 rabbitmq_processing_time = Histogram("rabbitmq_processing_time_seconds", "Message processing time in RabbitMQ")
+
+# 🔹 Метрики Prometheus (Redis)
+redis_keys_total = Gauge("redis_keys_total", "Total number of keys in Redis")
+redis_latency_seconds = Histogram("redis_latency_seconds", "Redis latency in seconds")
 
 # 🔹 Эндпоинт /metrics
 @router.get("/metrics")
@@ -64,8 +69,23 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		rabbitmq_errors_total.inc(metrics["errors_total"])
 		rabbitmq_processing_time.observe(metrics["avg_processing_time"])
 	except Exception:
-		# Если брокер недоступен, просто логируем ошибку
 		rabbitmq_errors_total.inc()
+
+	# --- Метрики Redis ---
+	redis = RedisCache()
+	try:
+		keys = await redis.keys("*")
+		redis_keys_total.set(len(keys))
+
+		import time
+		start = time.time()
+		pong = await redis.health_check()
+		elapsed = round(time.time() - start, 3)
+		if pong:
+			redis_latency_seconds.observe(elapsed)
+	except Exception:
+		# Если Redis недоступен, просто логируем ошибку
+		redis_keys_total.set(0)
 
 	return Response(generate_latest(), media_type="text/plain")
 

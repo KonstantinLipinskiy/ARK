@@ -116,6 +116,21 @@
         "type": "graph",
         "title": "RabbitMQ Processing Time",
         "targets": [{ "expr": "rabbitmq_processing_time_seconds" }]
+      },
+      {
+        "type": "graph",
+        "title": "Redis Keys Total",
+        "targets": [{ "expr": "redis_keys_total" }]
+      },
+      {
+        "type": "graph",
+        "title": "Redis Latency",
+        "targets": [{ "expr": "redis_latency_seconds" }]
+      },
+      {
+        "type": "graph",
+        "title": "Redis Errors",
+        "targets": [{ "expr": "redis_errors_total" }]
       }
     ],
     "templating": {

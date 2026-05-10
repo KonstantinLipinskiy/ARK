@@ -10,6 +10,9 @@ class RedisCache:
 					host: str = REDIS_CONFIG["host"],
 					port: int = REDIS_CONFIG["port"],
 					db: int = REDIS_CONFIG["db"]):
+		self.host = host
+		self.port = port
+		self.db = db
 		self.client = Redis(host=host, port=port, db=db, decode_responses=True)
 
 	async def set(self, key: str, value: dict, expire: int = 60):
@@ -31,6 +34,14 @@ class RedisCache:
 		except Exception as e:
 			logger.error(f"❌ Redis get error: {e}")
 			return None
+
+	async def set_json(self, key: str, value: dict, expire: int = 60):
+		"""Удобный метод для сохранения JSON."""
+		return await self.set(key, value, expire)
+
+	async def get_json(self, key: str) -> dict | None:
+		"""Удобный метод для получения JSON."""
+		return await self.get(key)
 
 	async def delete(self, key: str):
 		"""Удаляет ключ из Redis."""
@@ -96,3 +107,12 @@ class RedisCache:
 		except Exception as e:
 			logger.error(f"❌ Redis health check failed: {e}")
 			return False
+
+	async def switch_db(self, db: int):
+		"""Переключение на другую базу Redis."""
+		try:
+			self.db = db
+			self.client = Redis(host=self.host, port=self.port, db=db, decode_responses=True)
+			logger.info(f"🔄 Redis switched to DB {db}")
+		except Exception as e:
+			logger.error(f"❌ Redis switch_db error: {e}")
