@@ -26,6 +26,22 @@ class IndicatorFactory:
 	}
 
 	@classmethod
+	def supported_indicators(cls) -> list[str]:
+		"""
+		Возвращает список поддерживаемых индикаторов.
+		"""
+		return list(cls._registry.keys())
+
+	@classmethod
+	def validate_indicator(cls, name: str):
+		"""
+		Проверяет, что индикатор поддерживается.
+		"""
+		if name not in cls._registry:
+			logger.error(f"❌ Unsupported indicator requested: {name}")
+			raise ValueError(f"❌ Unsupported indicator: {name}. Supported: {cls.supported_indicators()}")
+
+	@classmethod
 	def register(cls, name: str, func):
 		"""
 		Добавление нового индикатора в фабрику.
@@ -42,9 +58,7 @@ class IndicatorFactory:
 		Унифицированный вызов индикатора (синхронный).
 		Пример: IndicatorFactory.calculate("EMA", series=close, period=14)
 		"""
-		if name not in cls._registry:
-			logger.error(f"❌ Unknown indicator: {name}")
-			raise ValueError(f"❌ Unknown indicator: {name}")
+		cls.validate_indicator(name)
 		func = cls._registry[name]
 
 		# Валидация входных данных
@@ -64,9 +78,7 @@ class IndicatorFactory:
 		Асинхронный вызов индикатора.
 		Если функция синхронная — выполняется в отдельном потоке.
 		"""
-		if name not in cls._registry:
-			logger.error(f"❌ Unknown indicator: {name}")
-			raise ValueError(f"❌ Unknown indicator: {name}")
+		cls.validate_indicator(name)
 		func = cls._registry[name]
 
 		cls._validate_inputs(kwargs)

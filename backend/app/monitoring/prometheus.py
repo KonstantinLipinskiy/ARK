@@ -42,6 +42,12 @@ rabbitmq_processing_time = Histogram("rabbitmq_processing_time_seconds", "Messag
 redis_keys_total = Gauge("redis_keys_total", "Total number of keys in Redis")
 redis_latency_seconds = Histogram("redis_latency_seconds", "Redis latency in seconds")
 
+# 🔹 Метрики Prometheus (Индикаторы)
+indicators_tasks_total = Counter("indicators_tasks_total", "Total indicator tasks queued")
+indicators_tasks_errors = Counter("indicators_tasks_errors_total", "Total indicator task errors")
+indicators_task_duration = Histogram("indicators_task_duration_seconds", "Indicator task execution time")
+indicators_queue_time = Histogram("indicators_queue_time_seconds", "Indicator task queue time")
+
 # 🔹 Эндпоинт /metrics
 @router.get("/metrics")
 async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
@@ -115,8 +121,15 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		if pong:
 			redis_latency_seconds.observe(elapsed)
 	except Exception:
-		# Если Redis недоступен, просто логируем ошибку
 		redis_keys_total.set(0)
+
+	# --- Метрики индикаторов ---
+	# Пример: количество задач в Redis
+	try:
+		indicator_keys = await redis.keys("indicator:*:status")
+		indicators_tasks_total.inc(len(indicator_keys))
+	except Exception:
+		indicators_tasks_errors.inc()
 
 	return Response(generate_latest(), media_type="text/plain")
 
@@ -124,3 +137,4 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 def log_error():
 	errors_counter.inc()
 	rabbitmq_errors_total.inc()
+	indicators_tasks_errors.inc()

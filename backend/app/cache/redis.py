@@ -116,3 +116,29 @@ class RedisCache:
 			logger.info(f"🔄 Redis switched to DB {db}")
 		except Exception as e:
 			logger.error(f"❌ Redis switch_db error: {e}")
+
+	# ---------- Indicator Tasks ----------
+	async def set_task_status(self, task_id: str, status: str, expire: int = 300):
+		"""
+		Сохраняет статус задачи индикатора (queued, done, error).
+		"""
+		try:
+			value = {"status": status}
+			await self.client.set(f"indicator:{task_id}:status", json.dumps(value), ex=expire)
+			logger.debug(f"📊 Redis task status set: {task_id} → {status}")
+		except Exception as e:
+			logger.error(f"❌ Redis set_task_status error: {e}")
+
+	async def get_task_status(self, task_id: str) -> dict | None:
+		"""
+		Получает статус задачи индикатора по task_id.
+		"""
+		try:
+			data = await self.client.get(f"indicator:{task_id}:status")
+			if data:
+					logger.debug(f"📊 Redis task status get: {task_id}")
+					return json.loads(data)
+			return None
+		except Exception as e:
+			logger.error(f"❌ Redis get_task_status error: {e}")
+			return None

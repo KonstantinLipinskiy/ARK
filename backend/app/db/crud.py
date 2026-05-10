@@ -492,14 +492,41 @@ async def save_indicator(db: AsyncSession, pair: str, name: str, value: str) -> 
 		logger.error(f"Ошибка сохранения индикатора: {e}")
 		raise
 
-async def get_indicators(db: AsyncSession, pair: str = None, name: str = None, skip: int = 0, limit: int = 100):
+async def get_indicator_by_id(db: AsyncSession, indicator_id: int) -> schemas.IndicatorORM | None:
+	"""Получить индикатор по его ID."""
+	result = await db.execute(select(schemas.IndicatorORM).filter(schemas.IndicatorORM.id == indicator_id))
+	return result.scalars().first()
+
+async def get_indicators(
+	db: AsyncSession,
+	pair: str = None,
+	name: str = None,
+	date_from: datetime = None,
+	date_to: datetime = None,
+	skip: int = 0,
+	limit: int = 100
+):
+	"""Получить список индикаторов с фильтрацией и пагинацией."""
 	query = select(schemas.IndicatorORM)
 	if pair:
 		query = query.filter(schemas.IndicatorORM.pair == pair)
 	if name:
 		query = query.filter(schemas.IndicatorORM.name == name)
+	if date_from:
+		query = query.filter(schemas.IndicatorORM.timestamp >= date_from)
+	if date_to:
+		query = query.filter(schemas.IndicatorORM.timestamp <= date_to)
+
+	total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
 	result = await db.execute(query.offset(skip).limit(limit))
-	return result.scalars().all()
+	indicators = result.scalars().all()
+
+	return {
+		"items": indicators,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}
 
 async def delete_indicator(db: AsyncSession, indicator_id: int):
 	result = await db.execute(select(schemas.IndicatorORM).filter(schemas.IndicatorORM.id == indicator_id))
@@ -514,6 +541,7 @@ async def delete_indicator(db: AsyncSession, indicator_id: int):
 		await db.rollback()
 		logger.error(f"Ошибка удаления индикатора: {e}")
 		raise
+
 
 # ---------- Analytics ----------
 async def get_user_winrate(db: AsyncSession, user_id: int) -> float:

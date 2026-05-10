@@ -14,8 +14,8 @@ class JWTMiddleware(BaseHTTPMiddleware):
 		self.security = HTTPBearer()
 
 	async def dispatch(self, request: Request, call_next):
-		# Проверяем только защищённые маршруты (например, /signals, /trades, /users)
-		if request.url.path.startswith(("/signals", "/trades", "/users")):
+		# Проверяем защищённые маршруты (теперь включая /indicators)
+		if request.url.path.startswith(("/signals", "/trades", "/users", "/indicators")):
 			try:
 					credentials: HTTPAuthorizationCredentials = await self.security(request)
 					token = credentials.credentials
