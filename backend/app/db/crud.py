@@ -551,3 +551,51 @@ async def count_signals_by_indicator(db: AsyncSession, indicator: str) -> int:
 		)
 	)
 	return result.scalar() or 0
+
+# ---------- Strategies ----------
+async def get_strategies(db: AsyncSession, skip: int = 0, limit: int = 100):
+	query = select(schemas.StrategyORM)
+	total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+	result = await db.execute(query.offset(skip).limit(limit))
+	strategies = result.scalars().all()
+	return {
+		"items": strategies,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}
+
+async def get_strategy_by_symbol(db: AsyncSession, symbol: str):
+	result = await db.execute(select(schemas.StrategyORM).filter(schemas.StrategyORM.symbol == symbol))
+	return result.scalars().first()
+
+async def update_strategy(db: AsyncSession, symbol: str, updates: dict):
+	result = await db.execute(select(schemas.StrategyORM).filter(schemas.StrategyORM.symbol == symbol))
+	strategy = result.scalars().first()
+	if not strategy:
+		return None
+	for key, value in updates.items():
+		if hasattr(strategy, key):
+			setattr(strategy, key, value)
+	try:
+		await db.commit()
+		await db.refresh(strategy)
+		return strategy
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка обновления стратегии: {e}")
+		raise
+
+async def delete_strategy(db: AsyncSession, symbol: str):
+	result = await db.execute(select(schemas.StrategyORM).filter(schemas.StrategyORM.symbol == symbol))
+	strategy = result.scalars().first()
+	if not strategy:
+		return None
+	await db.delete(strategy)
+	try:
+		await db.commit()
+		return True
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка удаления стратегии: {e}")
+		raise

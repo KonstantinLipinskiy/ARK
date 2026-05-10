@@ -6,9 +6,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 from app.db.session import get_db
 from app.db.schemas import UserORM, TradeORM, SignalORM, StrategyORM
-from app.services.strategy_service import load_strategies, add_strategy, update_strategy, delete_strategy
+from app.services.strategy_service import load_strategies, add_strategy, update_strategy, delete_strategy, toggle_strategy
 from app.services.risk_service import load_risk_settings, update_risk_settings
 from app.utils.auth import get_current_admin  # проверка JWT и роли admin
+from app.utils.logger import logger
+from app.utils.metrics import calculate_metrics
+from app.services.telegram import telegram_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -23,6 +26,12 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 		wins = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.profit > 0))
 		avg_profit = await db.scalar(select(func.avg(TradeORM.profit)))
 		active_positions = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "open"))
+		cancelled_trades = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "cancelled"))
+
+		# 🔹 Дополнительные метрики через calculate_metrics
+		result = await db.execute(select(TradeORM))
+		trades = result.scalars().all()
+		metrics = calculate_metrics(trades)
 
 		stats = {
 			"total_trades": total_trades,
@@ -30,10 +39,17 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 			"users": users,
 			"winrate": round((wins / total_trades) * 100, 2) if total_trades else 0,
 			"avg_profit": avg_profit or 0,
-			"active_positions": active_positions
+			"active_positions": active_positions,
+			"cancelled_trades": cancelled_trades or 0,
+			"max_drawdown": metrics.get("max_drawdown", 0.0),
+			"sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
+			"sortino_ratio": metrics.get("sortino_ratio", 0.0),
+			"profit_factor": metrics.get("profit_factor", 0.0)
 		}
+		logger.info("📊 Админ: статистика собрана")
 		return stats
 	except SQLAlchemyError as e:
+		logger.error(f"❌ Ошибка БД при получении статистики: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 # 🔹 Управление пользователями (например, блокировка)
@@ -47,9 +63,12 @@ async def block_user(user_id: int, db: AsyncSession = Depends(get_db), current_a
 	user.status = "blocked"
 	try:
 		await db.commit()
+		await telegram_service.send_user_blocked(user)
+		logger.info(f"⛔ Пользователь {user.username} (ID={user.id}) заблокирован админом")
 		return {"detail": f"User {user_id} blocked"}
 	except SQLAlchemyError as e:
 		await db.rollback()
+		logger.error(f"❌ Ошибка БД при блокировке пользователя: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 # 🔹 Получить список стратегий
@@ -63,6 +82,7 @@ async def create_strategy(strategy_data: dict, db: AsyncSession = Depends(get_db
 	strategy = await add_strategy(db, strategy_data)
 	if not strategy:
 		raise HTTPException(status_code=400, detail="Failed to add strategy")
+	logger.info(f"✅ Стратегия {strategy.symbol} добавлена админом")
 	return {"detail": f"Strategy {strategy.symbol} added"}
 
 # 🔹 Обновить стратегию
@@ -71,6 +91,7 @@ async def edit_strategy(symbol: str, updates: dict, db: AsyncSession = Depends(g
 	strategy = await update_strategy(db, symbol, updates)
 	if not strategy:
 		raise HTTPException(status_code=404, detail="Strategy not found")
+	logger.info(f"♻️ Стратегия {symbol} обновлена админом")
 	return {"detail": f"Strategy {symbol} updated"}
 
 # 🔹 Удалить стратегию
@@ -79,7 +100,18 @@ async def remove_strategy(symbol: str, db: AsyncSession = Depends(get_db), curre
 	success = await delete_strategy(db, symbol)
 	if not success:
 		raise HTTPException(status_code=404, detail="Strategy not found")
+	logger.info(f"🗑️ Стратегия {symbol} удалена админом")
 	return {"detail": f"Strategy {symbol} deleted"}
+
+# 🔹 Переключить стратегию (toggle)
+@router.post("/strategies/{symbol}/toggle")
+async def toggle_strategy_endpoint(symbol: str, enabled: bool, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
+	strategy = await toggle_strategy(db, symbol, enabled)
+	if not strategy:
+		raise HTTPException(status_code=404, detail="Strategy not found")
+	status = "enabled" if enabled else "disabled"
+	logger.info(f"🔀 Стратегия {symbol} переключена: {status}")
+	return {"detail": f"Strategy {symbol} {status}"}
 
 # 🔹 Получить текущие параметры риска (из БД)
 @router.get("/risk")
@@ -92,4 +124,5 @@ async def update_risk(updates: dict, db: AsyncSession = Depends(get_db), current
 	new_config = await update_risk_settings(db, updates)
 	if not new_config:
 		raise HTTPException(status_code=400, detail="Risk update failed")
+	logger.info("⚙️ Параметры риска обновлены админом")
 	return {"detail": "Risk config updated", "config": new_config}

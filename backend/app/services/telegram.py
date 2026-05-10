@@ -108,6 +108,20 @@ class TelegramService:
 		msg = f"⚙️ Маржинальный режим изменён: {symbol}, новый режим = {mode}"
 		await self.send_message_to_user(user, msg)
 
+	# 🔹 Новые уведомления для админских функций
+	async def send_user_blocked(self, user: UserORM):
+		msg = f"⛔ Пользователь {user.username} (ID={user.id}) был заблокирован администратором."
+		await self.send_message_to_user(user, msg)
+		logger.info(f"📤 Уведомление о блокировке отправлено пользователю {user.username}")
+
+	async def send_strategy_updated(self, strategy: dict):
+		msg = (
+			f"⚙️ Стратегия обновлена: {strategy.get('symbol', '-')}\n"
+			f"Параметры: {strategy}"
+		)
+		# Здесь можно рассылать уведомление всем админам или конкретным пользователям
+		logger.info(f"📤 Уведомление об изменении стратегии: {strategy.get('symbol', '-')}")
+
 
 telegram_service = TelegramService(bot)
 broker = RabbitMQBroker()
@@ -223,4 +237,3 @@ async def risk_command(message: types.Message):
 			f"Strength Multiplier: {limits.get('strength_multiplier', '-')}"
 		)
 		await message.answer(msg)
-

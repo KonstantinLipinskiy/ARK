@@ -115,6 +115,7 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		if pong:
 			redis_latency_seconds.observe(elapsed)
 	except Exception:
+		# Если Redis недоступен, просто логируем ошибку
 		redis_keys_total.set(0)
 
 	return Response(generate_latest(), media_type="text/plain")

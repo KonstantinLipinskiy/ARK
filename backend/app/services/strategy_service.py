@@ -5,6 +5,7 @@ from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
 from app.db.schemas import StrategyORM
 from app.utils.logger import logger
+from app.services.telegram import telegram_service
 
 # --- Кэш ---
 STRATEGY_CONFIG = {}
@@ -49,6 +50,7 @@ async def load_strategies(db: AsyncSession, use_cache: bool = True):
 			"trailing_mode": s.trailing_mode or "none",
 			"allocation_percent": s.allocation_percent or 1.0,
 			"leverage": s.leverage or 1,
+			"enabled": s.enabled if hasattr(s, "enabled") else True,
 		}
 
 		config[s.symbol].append(strategy_entry)
@@ -69,6 +71,7 @@ async def add_strategy(db: AsyncSession, strategy_data: dict):
 		await db.commit()
 		await db.refresh(strategy)
 		logger.info(f"✅ Стратегия {strategy.symbol} добавлена")
+		await telegram_service.send_strategy_updated(strategy_data)
 		return strategy
 	except SQLAlchemyError as e:
 		logger.error(f"❌ Ошибка добавления стратегии: {e}")
@@ -91,6 +94,7 @@ async def update_strategy(db: AsyncSession, symbol: str, updates: dict):
 		await db.commit()
 		await db.refresh(strategy)
 		logger.info(f"♻️ Стратегия {symbol} обновлена")
+		await telegram_service.send_strategy_updated(updates)
 		return strategy
 	except SQLAlchemyError as e:
 		logger.error(f"❌ Ошибка обновления стратегии: {e}")
@@ -114,6 +118,32 @@ async def delete_strategy(db: AsyncSession, symbol: str):
 		logger.error(f"❌ Ошибка удаления стратегии: {e}")
 		await db.rollback()
 		return False
+
+# --- Toggle ---
+async def toggle_strategy(db: AsyncSession, symbol: str, enabled: bool):
+	"""Включить/выключить стратегию и синхронизировать конфиг с ботом"""
+	try:
+		result = await db.execute(select(StrategyORM).where(StrategyORM.symbol == symbol))
+		strategy = result.scalar_one_or_none()
+		if not strategy:
+			logger.warning(f"⚠️ Стратегия {symbol} не найдена для переключения")
+			return None
+
+		strategy.enabled = enabled
+		await db.commit()
+		await db.refresh(strategy)
+
+		# Обновляем глобальный конфиг
+		await load_strategies(db, use_cache=False)
+
+		status = "включена" if enabled else "выключена"
+		logger.info(f"🔀 Стратегия {symbol} {status}")
+		await telegram_service.send_strategy_updated({"symbol": symbol, "enabled": enabled})
+		return strategy
+	except SQLAlchemyError as e:
+		logger.error(f"❌ Ошибка переключения стратегии {symbol}: {e}")
+		await db.rollback()
+		return None
 
 # --- Валидация ---
 def validate_strategy(strategy: dict) -> bool:
