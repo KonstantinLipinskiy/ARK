@@ -1,7 +1,9 @@
+# app/utils/helpers.py
 import datetime
 import json
 import hashlib
 import uuid
+from typing import Any, Dict, Optional
 
 # --- Работа с датами и временем ---
 def format_timestamp(ts: float) -> str:
@@ -16,7 +18,7 @@ def parse_iso(date_str: str) -> datetime.datetime:
 	"""Преобразует ISO строку обратно в datetime."""
 	try:
 		return datetime.datetime.fromisoformat(date_str)
-	except ValueError:
+	except (ValueError, TypeError):
 		return datetime.datetime.utcnow()
 
 # --- Работа с идентификаторами ---
@@ -41,23 +43,25 @@ def is_positive(value: float) -> bool:
 	"""Возвращает True, если число положительное."""
 	return value > 0
 
-def safe_divide(a: float, b: float) -> float:
+def safe_divide(a: Optional[float], b: Optional[float]) -> float:
 	"""Деление с защитой от деления на ноль."""
 	try:
-		return a / b if b != 0 else 0.0
+		if b is None or b == 0:
+			return 0.0
+		return a / b if a is not None else 0.0
 	except Exception:
 		return 0.0
 
-def percent_change(a: float, b: float) -> float:
+def percent_change(a: Optional[float], b: Optional[float]) -> float:
 	"""Процентное изменение между двумя значениями."""
 	try:
-		if a == 0:
+		if a is None or a == 0:
 			return 0.0
 		return ((b - a) / a) * 100
 	except Exception:
 		return 0.0
 
-def safe_float(value) -> float:
+def safe_float(value: Any) -> float:
 	"""Преобразование строки/значения в число с защитой от ошибок."""
 	try:
 		return float(value)
@@ -65,29 +69,32 @@ def safe_float(value) -> float:
 		return 0.0
 
 # --- Работа с JSON ---
-def load_json(data: str) -> dict:
+def load_json(data: str) -> Dict[str, Any]:
 	"""Безопасная загрузка JSON."""
 	try:
 		return json.loads(data)
 	except json.JSONDecodeError:
 		return {}
 
-def dump_json(obj: dict) -> str:
+def dump_json(obj: Dict[str, Any]) -> str:
 	"""Безопасная сериализация в строку."""
 	try:
-		return json.dumps(obj)
+		return json.dumps(obj, ensure_ascii=False, default=str)
 	except Exception:
 		return "{}"
 
-def pretty_json(obj: dict) -> str:
+def pretty_json(obj: Dict[str, Any]) -> str:
 	"""Форматированный JSON для логов."""
 	try:
-		return json.dumps(obj, indent=4, ensure_ascii=False)
+		return json.dumps(obj, indent=4, ensure_ascii=False, default=str)
 	except Exception:
 		return "{}"
 
 # --- Утилиты для мониторинга ---
-def hash_signal_key(signal: dict) -> str:
-	"""Уникальный ключ для метрик Prometheus по сигналу."""
+def hash_signal_key(signal: Dict[str, Any]) -> str:
+	"""
+	Уникальный ключ для метрик Prometheus по сигналу.
+	Можно расширить: добавить user_id или strategy.
+	"""
 	base = f"{signal.get('symbol', '')}_{signal.get('indicator', '')}_{signal.get('direction', '')}"
 	return short_hash(base, length=12)

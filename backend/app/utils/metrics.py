@@ -1,5 +1,7 @@
-from typing import List, Dict, Union
+# app/utils/metrics.py
+from typing import List, Dict, Union, Optional
 import math
+import asyncio
 from prometheus_client import Gauge, Counter, Histogram
 
 # --- Trading Metrics ---
@@ -82,6 +84,23 @@ def calculate_metrics(trades: List[Union[Dict, object]]) -> Dict:
 		**calculate_max_consecutive(trades),
 		"trades_count": len(trades)
 	}
+
+# --- Метрики по пользователям и стратегиям ---
+def calculate_metrics_by_user(trades: List[Union[Dict, object]], user_id: str) -> Dict:
+	"""Метрики в разрезе пользователя."""
+	user_trades = [t for t in trades if getattr(t, "user_id", None) == user_id or (isinstance(t, dict) and t.get("user_id") == user_id)]
+	return calculate_metrics(user_trades)
+
+def calculate_metrics_by_strategy(trades: List[Union[Dict, object]], strategy: str) -> Dict:
+	"""Метрики в разрезе стратегии."""
+	strategy_trades = [t for t in trades if getattr(t, "strategy", None) == strategy or (isinstance(t, dict) and t.get("strategy") == strategy)]
+	return calculate_metrics(strategy_trades)
+
+# --- Асинхронный расчёт ---
+async def calculate_metrics_async(trades: List[Union[Dict, object]]) -> Dict:
+	"""Асинхронный расчёт метрик."""
+	loop = asyncio.get_event_loop()
+	return await loop.run_in_executor(None, lambda: calculate_metrics(trades))
 
 # --- ML Training Metrics (Prometheus) ---
 ml_accuracy = Gauge("ml_training_accuracy", "Accuracy of ML training")
