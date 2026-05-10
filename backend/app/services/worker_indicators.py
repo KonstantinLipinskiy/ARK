@@ -38,13 +38,13 @@ class IndicatorWorker:
 			if task_type == "indicator":
 					if not pair or not indicator:
 						logger.error(f"❌ Invalid indicator message: {message}")
+						await self.broker.publish_alert({"type": "error", "reason": "Invalid indicator message", "payload": message})
 						return
 
 					async with async_session() as session:
 						redis = RedisCache()
 						service = IndicatorsService(session, redis)
 
-						# heavy calc вынесен в отдельный таск (async)
 						result = await service.calculate_and_store(pair, indicator, **kwargs)
 
 					elapsed = round(time.time() - start_time, 3)
@@ -53,11 +53,13 @@ class IndicatorWorker:
 							f"✅ Indicator {indicator} for {pair} calculated and stored "
 							f"(elapsed {elapsed}s, params={kwargs})"
 						)
+						await self.broker.publish_log({"type": "indicator", "pair": pair, "indicator": indicator, "elapsed": elapsed})
 					else:
 						logger.error(
 							f"❌ Indicator {indicator} for {pair} failed "
 							f"(elapsed {elapsed}s, params={kwargs})"
 						)
+						await self.broker.publish_alert({"type": "indicator_failed", "pair": pair, "indicator": indicator, "params": kwargs})
 
 			elif task_type == "ml_train":
 					trades = message.get("trades", [])
@@ -65,6 +67,7 @@ class IndicatorWorker:
 
 					if not trades:
 						logger.error("❌ ML training skipped: empty trades")
+						await self.broker.publish_alert({"type": "ml_train_skipped", "reason": "empty trades"})
 						return
 
 					try:
@@ -75,8 +78,10 @@ class IndicatorWorker:
 							f"🤖 ML training completed for {pair} ({model_type}) "
 							f"in {elapsed}s | metrics={metrics} | trades={len(trades)}"
 						)
+						await self.broker.publish_log({"type": "ml_train", "pair": pair, "model": model_type, "metrics": metrics, "elapsed": elapsed})
 					except Exception as e:
 						logger.error(f"❌ ML training error: {e} | trades={len(trades)}")
+						await self.broker.publish_alert({"type": "ml_train_error", "error": str(e), "trades": len(trades)})
 
 			elif task_type == "ml_predict":
 					input_data = message.get("input_data", [])
@@ -84,6 +89,7 @@ class IndicatorWorker:
 
 					if not input_data:
 						logger.error("❌ ML prediction skipped: empty input_data")
+						await self.broker.publish_alert({"type": "ml_predict_skipped", "reason": "empty input_data"})
 						return
 
 					try:
@@ -93,22 +99,25 @@ class IndicatorWorker:
 							f"🔮 ML prediction completed for {pair} ({model_type}) "
 							f"in {elapsed}s | predictions={predictions}"
 						)
+						await self.broker.publish_log({"type": "ml_predict", "pair": pair, "model": model_type, "predictions": predictions, "elapsed": elapsed})
 					except Exception as e:
 						logger.error(f"❌ ML prediction error: {e} | input_size={len(input_data)}")
+						await self.broker.publish_alert({"type": "ml_predict_error", "error": str(e), "input_size": len(input_data)})
 
 			else:
 					logger.error(f"❌ Unknown task type: {task_type}")
+					await self.broker.publish_alert({"type": "unknown_task", "task_type": task_type, "payload": message})
 
 		except Exception as e:
 			logger.error(f"❌ Worker error: {e} | message={message}")
+			await self.broker.publish_alert({"type": "worker_error", "error": str(e), "payload": message})
 
 	async def start(self):
 		"""
 		Запуск воркера: слушает очередь RabbitMQ и обрабатывает задачи.
 		"""
 		logger.info(f"🚀 IndicatorWorker started, listening on queue: {self.queue_name}")
-		await self.broker.consume(
-			queue_name=self.queue_name,
+		await self.broker.consume_indicators(
 			callback=lambda msg: asyncio.create_task(self.process_message(json.loads(msg)))
 		)
 

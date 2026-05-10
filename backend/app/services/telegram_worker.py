@@ -91,6 +91,21 @@ async def process_notification(message: str):
 					f"{summary}"
 			)
 
+		elif msg_type == "alert":
+			reason = payload.get("reason", "Неизвестная причина")
+			text = (
+					f"🚨 ALERT!\n"
+					f"Тип: {payload.get('alert_type', '-')}\n"
+					f"Причина: {reason}\n"
+					f"Детали: {payload.get('details', '-')}"
+			)
+
+		elif msg_type == "log":
+			text = (
+					f"📝 Лог:\n"
+					f"{payload.get('details', '-')}"
+			)
+
 		# --- Отправка пользователю ---
 		if user_id:
 			user = await get_user_by_id(user_id)
@@ -111,11 +126,17 @@ async def process_notification(message: str):
 
 	except Exception as e:
 		logger.error(f"❌ Ошибка отправки в Telegram: {e}")
+		# публикуем ошибку в alerts_queue
+		await broker.publish_alert({"type": "telegram_error", "error": str(e), "payload": message})
 
 async def consume_notifications():
-	"""Подключение к RabbitMQ и прослушивание очереди telegram_notifications."""
+	"""Подключение к RabbitMQ и прослушивание очередей уведомлений."""
 	await broker.connect()
+	# слушаем telegram_notifications
 	await broker.consume_telegram(process_notification)
+	# слушаем alerts и logs
+	await broker.consume_alerts(process_notification)
+	await broker.consume_logs(process_notification)
 
 async def main():
 	logger.info("🚀 Запуск Telegram воркера...")

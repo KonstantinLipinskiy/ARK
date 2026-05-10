@@ -3,10 +3,11 @@ from fastapi import APIRouter, Response, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
-from prometheus_client import Gauge, Counter, generate_latest
+from prometheus_client import Gauge, Counter, Histogram, generate_latest
 from app.db.session import get_db
 from app.db.schemas import TradeORM, SignalORM
 from app.utils.metrics import calculate_metrics, ml_accuracy, ml_loss
+from app.broker.rabbitmq import RabbitMQBroker
 
 router = APIRouter()
 
@@ -21,16 +22,21 @@ profit_factor_gauge = Gauge("bot_profit_factor", "Profit factor of trades")
 errors_counter = Counter("bot_errors_total", "Number of failed orders")
 active_signals_gauge = Gauge("bot_active_signals", "Number of active signals")
 
+# 🔹 Метрики Prometheus (RabbitMQ)
+rabbitmq_messages_published = Counter("rabbitmq_messages_published_total", "Total messages published to RabbitMQ")
+rabbitmq_messages_consumed = Counter("rabbitmq_messages_consumed_total", "Total messages consumed from RabbitMQ")
+rabbitmq_errors_total = Counter("rabbitmq_errors_total", "Total RabbitMQ errors")
+rabbitmq_processing_time = Histogram("rabbitmq_processing_time_seconds", "Message processing time in RabbitMQ")
+
 # 🔹 Эндпоинт /metrics
 @router.get("/metrics")
 async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
-	# Берём реальные сделки из БД
+	# --- Метрики торговли ---
 	result = await db.execute(select(TradeORM))
 	trades = result.scalars().all()
 
 	stats = calculate_metrics(trades)
 
-	# Обновляем метрики торговли
 	winrate_gauge.set(stats["winrate"])
 	profit_gauge.set(stats["total_profit"])
 	drawdown_gauge.set(stats["max_drawdown"])
@@ -45,13 +51,25 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	)
 	active_signals_gauge.set(active_signals or 0)
 
-	# 🔹 Метрики ML обучения (пример: последние значения)
-	# Эти значения обновляются через export_ml_metrics() в utils/metrics.py
-	# Здесь мы просто публикуем их в Prometheus
-	# ml_accuracy и ml_loss уже являются Gauge и обновляются при обучении
+	# --- Метрики ML обучения ---
+	# ml_accuracy и ml_loss обновляются при обучении через utils/metrics.py
+	# Здесь они просто публикуются в Prometheus
+
+	# --- Метрики RabbitMQ ---
+	broker = RabbitMQBroker()
+	try:
+		metrics = broker.get_metrics()
+		rabbitmq_messages_published.inc(metrics["messages_published"])
+		rabbitmq_messages_consumed.inc(metrics["messages_consumed"])
+		rabbitmq_errors_total.inc(metrics["errors_total"])
+		rabbitmq_processing_time.observe(metrics["avg_processing_time"])
+	except Exception:
+		# Если брокер недоступен, просто логируем ошибку
+		rabbitmq_errors_total.inc()
 
 	return Response(generate_latest(), media_type="text/plain")
 
 # 🔹 Логирование ошибок
 def log_error():
 	errors_counter.inc()
+	rabbitmq_errors_total.inc()
