@@ -23,6 +23,10 @@ profit_factor_gauge = Gauge("bot_profit_factor", "Profit factor of trades")
 errors_counter = Counter("bot_errors_total", "Number of failed orders")
 active_signals_gauge = Gauge("bot_active_signals", "Number of active signals")
 
+# 🔹 Метрики Prometheus (сигналы)
+signals_created_total = Counter("signals_created_total", "Total number of signals created")
+signals_filtered_total = Counter("signals_filtered_total", "Total number of signals filtered out as weak")
+
 # 🔹 Метрики Prometheus (RabbitMQ)
 rabbitmq_messages_published = Counter("rabbitmq_messages_published_total", "Total messages published to RabbitMQ")
 rabbitmq_messages_consumed = Counter("rabbitmq_messages_consumed_total", "Total messages consumed from RabbitMQ")
@@ -55,6 +59,16 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		select(func.count()).select_from(SignalORM).filter(SignalORM.status == "active")
 	)
 	active_signals_gauge.set(active_signals or 0)
+
+	# --- Метрики сигналов ---
+	total_signals = await db.scalar(select(func.count()).select_from(SignalORM))
+	signals_created_total.inc(total_signals or 0)
+
+	# Считаем количество слабых сигналов (confidence < 0.6)
+	weak_signals = await db.scalar(
+		select(func.count()).select_from(SignalORM).filter(SignalORM.confidence < 0.6)
+	)
+	signals_filtered_total.inc(weak_signals or 0)
 
 	# --- Метрики ML обучения ---
 	# ml_accuracy и ml_loss обновляются при обучении через utils/metrics.py

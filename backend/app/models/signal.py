@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+# app/models/signal.py
+from pydantic import BaseModel, Field, validator
 from datetime import datetime
 from typing import Optional
 from typing_extensions import Literal
@@ -31,6 +32,28 @@ class Signal(BaseModel):
 	trade_id: Optional[int] = Field(None, description="ID сделки, связанной с сигналом")
 	confidence: Optional[float] = Field(None, ge=0, le=1, description="Доверие к сигналу")
 	source: Optional[str] = Field(None, description="Источник сигнала (стратегия или внешний сервис)")
+
+	# 🔹 Валидаторы
+	@validator("timestamp")
+	def validate_timestamp(cls, v: datetime) -> datetime:
+		"""Проверка, что timestamp не в будущем."""
+		if v > datetime.utcnow():
+			raise ValueError("timestamp не может быть в будущем")
+		return v
+
+	@validator("strength")
+	def validate_strength(cls, v: float) -> float:
+		"""Проверка диапазона strength."""
+		if not (0 <= v <= 1):
+			raise ValueError("strength должен быть в диапазоне [0,1]")
+		return v
+
+	@validator("confidence")
+	def validate_confidence(cls, v: Optional[float]) -> Optional[float]:
+		"""Проверка диапазона confidence."""
+		if v is not None and not (0 <= v <= 1):
+			raise ValueError("confidence должен быть в диапазоне [0,1]")
+		return v
 
 	class Config:
 		json_schema_extra = {

@@ -37,6 +37,7 @@ class TelegramService:
 		await self.bot.send_message(chat_id=telegram_id, text=text)
 
 	async def send_trade_notification(self, trade: dict, user_id: int | None = None):
+		"""Уведомление о сделке."""
 		async with get_session() as session:
 			if user_id:
 					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
@@ -54,6 +55,25 @@ class TelegramService:
 							f"Рассчитанный риск: {trade.get('risk', '-')}"
 						)
 						await self.send_message_to_user(user, msg)
+						logger.info(f"📤 Уведомление о сделке отправлено пользователю {user.username}")
+
+	async def send_signal_notification(self, signal: dict, user_id: int | None = None):
+		"""Уведомление о новом сигнале."""
+		async with get_session() as session:
+			if user_id:
+					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+					user = result.scalars().first()
+					if user:
+						msg = (
+							f"📈 Новый сигнал: {signal.get('symbol', 'N/A')} {signal.get('direction', '-')}\n"
+							f"Индикатор: {signal.get('indicator', '-')}\n"
+							f"Сила: {signal.get('strength', '-')}\n"
+							f"Confidence: {signal.get('confidence', '-')}\n"
+							f"Источник: {signal.get('source', '-')}\n"
+							f"Время: {signal.get('timestamp', '-')}"
+						)
+						await self.send_message_to_user(user, msg)
+						logger.info(f"📤 Уведомление о сигнале отправлено пользователю {user.username}")
 
 	async def send_error(self, error: str, user_id: int | None = None,
 								symbol: str = "-", position_size: float = 0.0, deposit: float = 0.0):
@@ -111,7 +131,7 @@ async def is_admin(message: types.Message) -> bool:
 async def start_command(message: types.Message):
 	if not await is_authorized(message):
 		return
-	await message.answer("Привет! Я ARK Bot. Буду присылать уведомления о сделках и статистику.")
+	await message.answer("Привет! Я ARK Bot. Буду присылать уведомления о сделках и сигналах.")
 
 @dp.message(Command("status"))
 async def status_command(message: types.Message):

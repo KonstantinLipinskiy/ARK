@@ -186,6 +186,7 @@ async def get_backtest_reports(db: AsyncSession, symbol: str = None, strategy: s
 	result = await db.execute(query)
 	return result.scalars().all()
 
+
 # ---------- Signals ----------
 async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 	try:
@@ -196,8 +197,7 @@ async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 			direction=signal.direction,
 			user_id=signal.user_id,
 			confidence=signal.confidence,
-			source=signal.source,
-			probability=getattr(signal, "probability", None)
+			source=signal.source
 		)
 		db.add(db_signal)
 		await db.commit()
@@ -208,9 +208,17 @@ async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 		logger.error(f"Ошибка создания сигнала: {e}")
 		raise
 
-async def get_signals(db: AsyncSession, skip: int = 0, limit: int = 100,
-							symbol: str = None, indicator: str = None,
-							user_id: int = None, trade_id: int = None):
+async def get_signals(
+	db: AsyncSession,
+	skip: int = 0,
+	limit: int = 100,
+	symbol: str = None,
+	indicator: str = None,
+	user_id: int = None,
+	trade_id: int = None,
+	date_from: datetime = None,
+	date_to: datetime = None
+):
 	query = select(schemas.SignalORM).options(selectinload(schemas.SignalORM.user))
 	if symbol:
 		query = query.filter(schemas.SignalORM.symbol == symbol)
@@ -220,8 +228,24 @@ async def get_signals(db: AsyncSession, skip: int = 0, limit: int = 100,
 		query = query.filter(schemas.SignalORM.user_id == user_id)
 	if trade_id:
 		query = query.filter(schemas.SignalORM.id == trade_id)
+	if date_from:
+		query = query.filter(schemas.SignalORM.timestamp >= date_from)
+	if date_to:
+		query = query.filter(schemas.SignalORM.timestamp <= date_to)
+
+	total_count = await db.scalar(
+		select(func.count()).select_from(query.subquery())
+	)
+
 	result = await db.execute(query.offset(skip).limit(limit))
-	return result.scalars().all()
+	signals = result.scalars().all()
+
+	return {
+		"items": signals,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}
 
 async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 	result = await db.execute(select(schemas.SignalORM).filter(schemas.SignalORM.id == signal_id))
@@ -230,7 +254,7 @@ async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 		return None
 
 	allowed_fields = {"symbol", "indicator", "strength", "confidence",
-							"source", "direction", "user_id", "probability"}
+							"source", "direction", "user_id"}
 	for key, value in updates.items():
 		if key in allowed_fields:
 			setattr(db_signal, key, value)
@@ -242,6 +266,28 @@ async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 	except SQLAlchemyError as e:
 		await db.rollback()
 		logger.error(f"Ошибка обновления сигнала: {e}")
+		raise
+
+async def patch_signal(db: AsyncSession, signal_id: int, updates: dict):
+	"""Частичное обновление сигнала (PATCH)."""
+	result = await db.execute(select(schemas.SignalORM).filter(schemas.SignalORM.id == signal_id))
+	db_signal = result.scalars().first()
+	if not db_signal:
+		return None
+
+	allowed_fields = {"symbol", "indicator", "strength", "confidence",
+							"source", "direction", "user_id"}
+	for key, value in updates.items():
+		if key in allowed_fields and value is not None:
+			setattr(db_signal, key, value)
+
+	try:
+		await db.commit()
+		await db.refresh(db_signal)
+		return db_signal
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка PATCH обновления сигнала: {e}")
 		raise
 
 async def delete_signal(db: AsyncSession, signal_id: int):
