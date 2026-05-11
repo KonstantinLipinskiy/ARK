@@ -1,65 +1,85 @@
-from logging.config import fileConfig
+import asyncio
+import logging
 import os
-import sys
-from dotenv import load_dotenv
+from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
 from alembic import context
+from app.db import schemas  # убедись, что здесь импортированы все ORM модели
 
-# Добавляем корень проекта (backend) в sys.path,
-# чтобы Alembic видел пакет app
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# -------------------------------------------------------------------
+# Логирование Alembic
+# -------------------------------------------------------------------
+fileConfig(context.config.config_file_name)
+logging.basicConfig(
+	format="%(asctime)s [%(levelname)s] %(message)s",
+	level=logging.INFO
+)
+logger = logging.getLogger("alembic.env")
 
-# Импортируем базу и модели
-from app.db.base import Base
-from app.db import schemas  # если у тебя все модели собираются здесь
+# -------------------------------------------------------------------
+# Выбор окружения (testnet / mainnet)
+# -------------------------------------------------------------------
+DATABASE_URL = (
+	os.getenv("DATABASE_URL_TESTNET")
+	if os.getenv("USE_TESTNET") == "true"
+	else os.getenv("DATABASE_URL")
+)
 
-# Загружаем переменные окружения
-load_dotenv()
+# -------------------------------------------------------------------
+# Создание движка и фабрики сессий
+# -------------------------------------------------------------------
+try:
+	connectable = create_async_engine(DATABASE_URL, echo=True, future=True)
+	async_session_factory = sessionmaker(
+		bind=connectable,
+		class_=AsyncSession,
+		expire_on_commit=False
+	)
+	logger.info("Успешное подключение к БД")
+except Exception as e:
+	logger.error(f"Ошибка подключения к БД: {e}")
+	raise
 
-# Alembic Config object
-config = context.config
+# -------------------------------------------------------------------
+# Метаданные моделей
+# -------------------------------------------------------------------
+target_metadata = schemas.Base.metadata
 
-# Устанавливаем URL подключения из .env
-DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL:
-	config.set_main_option("sqlalchemy.url", DATABASE_URL)
-
-# Настройка логирования
-if config.config_file_name is not None:
-	fileConfig(config.config_file_name)
-
-# Метаданные моделей для автогенерации
-target_metadata = Base.metadata
-
-
-def run_migrations_offline() -> None:
-	"""Run migrations in 'offline' mode."""
-	url = config.get_main_option("sqlalchemy.url")
+# -------------------------------------------------------------------
+# Запуск миграций
+# -------------------------------------------------------------------
+def run_migrations_offline():
+	"""Запуск миграций в offline-режиме (без подключения к БД)."""
+	url = DATABASE_URL
 	context.configure(
 		url=url,
 		target_metadata=target_metadata,
 		literal_binds=True,
 		dialect_opts={"paramstyle": "named"},
 	)
-
 	with context.begin_transaction():
 		context.run_migrations()
 
 
-def run_migrations_online() -> None:
-	"""Run migrations in 'online' mode."""
-	connectable = engine_from_config(
-		config.get_section(config.config_ini_section, {}),
-		prefix="sqlalchemy.",
-		poolclass=pool.NullPool,
-	)
+def run_migrations_online():
+	"""Запуск миграций в online-режиме (с подключением к БД)."""
+	async def do_run_migrations():
+		async with connectable.connect() as connection:
+			await connection.run_sync(
+					lambda sync_conn: context.configure(
+						connection=sync_conn,
+						target_metadata=target_metadata,
+						compare_type=True,
+						compare_server_default=True,
+					)
+			)
+			async with connection.begin():
+					context.run_migrations()
 
-	with connectable.connect() as connection:
-		context.configure(connection=connection, target_metadata=target_metadata)
-
-		with context.begin_transaction():
-			context.run_migrations()
+	asyncio.run(do_run_migrations())
 
 
 if context.is_offline_mode():

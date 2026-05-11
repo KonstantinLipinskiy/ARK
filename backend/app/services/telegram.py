@@ -33,7 +33,10 @@ class TelegramService:
 		await self.bot.send_message(chat_id=user.telegram_id, text=text)
 
 	async def send_message_by_id(self, telegram_id: str, text: str):
-		"""Отправка сообщения по telegram_id напрямую."""
+		"""Отправка сообщения по telegram_id напрямую (используется в TelegramHandler)."""
+		if not telegram_id:
+			logger.error("❌ ADMIN_TELEGRAM_ID не задан, невозможно отправить сообщение")
+			return
 		await self.bot.send_message(chat_id=telegram_id, text=text)
 
 	async def send_trade_notification(self, trade: dict, user_id: int | None = None):
@@ -78,6 +81,7 @@ class TelegramService:
 
 	async def send_error(self, error: str, user_id: int | None = None,
 								symbol: str = "-", position_size: float = 0.0, deposit: float = 0.0):
+		"""Уведомление об ошибке."""
 		async with get_session() as session:
 			if user_id:
 					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
@@ -119,13 +123,15 @@ class TelegramService:
 			f"⚙️ Стратегия обновлена: {strategy.get('symbol', '-')}\n"
 			f"Параметры: {strategy}"
 		)
-		# Здесь можно рассылать уведомление всем админам или конкретным пользователям
 		logger.info(f"📤 Уведомление об изменении стратегии: {strategy.get('symbol', '-')}")
 
 
 telegram_service = TelegramService(bot)
 broker = RabbitMQBroker()
 
+# -------------------------------------------------------------------
+# Вспомогательные функции авторизации
+# -------------------------------------------------------------------
 async def get_user_by_chat_id(chat_id: int) -> UserORM | None:
 	async with get_session() as session:
 		result = await session.execute(select(UserORM).filter(UserORM.telegram_id == str(chat_id)))
@@ -142,6 +148,9 @@ async def is_admin(message: types.Message) -> bool:
 	user = await get_user_by_chat_id(message.chat.id)
 	return bool(user and user.is_admin)
 
+# -------------------------------------------------------------------
+# Команды Telegram-бота
+# -------------------------------------------------------------------
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
 	if not await is_authorized(message):
@@ -173,7 +182,8 @@ async def trades_command(message: types.Message):
 		trades = result.scalars().all()
 		if trades:
 			msg = "\n".join([
-					f"{t.symbol} {t.side} {t.amount} @ {t.price} ({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
+					f"{t.symbol} {t.side} {t.amount} @ {t.price} "
+					f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
 					for t in trades
 			])
 			await message.answer(f"📊 Последние сделки:\n{msg}")
