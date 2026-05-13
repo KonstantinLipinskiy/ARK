@@ -1,10 +1,8 @@
-# app/api/routes_signals.py
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
-
 from app.models.signal import Signal
 from app.db.session import get_db
 from app.db import crud
@@ -70,7 +68,6 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 	if signal.direction not in ["buy", "sell"]:
 		raise HTTPException(status_code=400, detail="Direction must be 'buy' or 'sell'")
 
-	# формируем признаки для ML
 	features = {
 		"ema": getattr(signal, "ema", 0.0),
 		"rsi": getattr(signal, "rsi", 0.0),
@@ -79,7 +76,6 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 		"atr": getattr(signal, "atr", 0.0)
 	}
 
-	# фильтрация слабых сигналов
 	if ml_service.model:
 		try:
 			prob = ml_service.predict_signal(features)
@@ -98,15 +94,12 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 		if prob is not None:
 			new_signal.confidence = prob
 
-		# RabbitMQ публикация
 		await rabbitmq.publish_signal(new_signal.dict())
 		logger.info(f"📤 Сигнал опубликован в RabbitMQ: {new_signal.symbol}")
 
-		# Redis сохранение последнего сигнала
 		await redis_cache.set_json("last_signal", new_signal.dict(), expire=300)
 		logger.info(f"💾 Сигнал сохранён в Redis: {new_signal.symbol}")
 
-		# Telegram уведомление
 		msg = f"📈 Новый сигнал: {new_signal.symbol} {new_signal.direction} ({new_signal.indicator})"
 		if prob is not None:
 			msg += f" | ML prob={prob:.2f}"
@@ -118,7 +111,6 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 		logger.error(f"❌ Ошибка БД при создании сигнала: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# 🔹 Обновить сигнал
 @router.put("/{signal_id}", response_model=Signal)
 async def update_signal(signal_id: int, updated: Signal, db: AsyncSession = Depends(get_db)):
 	signal = await crud.update_signal(db, signal_id, updated.dict())
@@ -127,7 +119,6 @@ async def update_signal(signal_id: int, updated: Signal, db: AsyncSession = Depe
 	logger.info(f"✏️ Сигнал обновлён ID={signal_id}")
 	return signal
 
-# 🔹 Частичное обновление сигнала (PATCH)
 @router.patch("/{signal_id}", response_model=Signal)
 async def patch_signal(signal_id: int, updates: dict, db: AsyncSession = Depends(get_db)):
 	signal = await crud.patch_signal(db, signal_id, updates)
@@ -136,7 +127,6 @@ async def patch_signal(signal_id: int, updates: dict, db: AsyncSession = Depends
 	logger.info(f"✏️ Сигнал частично обновлён ID={signal_id}")
 	return signal
 
-# 🔹 Удалить сигнал
 @router.delete("/{signal_id}")
 async def delete_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
 	deleted = await crud.delete_signal(db, signal_id)

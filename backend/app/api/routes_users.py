@@ -1,4 +1,3 @@
-# app/api/routes_users.py
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +14,6 @@ from app.utils.logger import logger
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-# 🔹 Получить всех пользователей (с метаданными)
 @router.get("/")
 async def get_users(
 	skip: int = 0,
@@ -47,7 +45,7 @@ async def get_users(
 		logger.error(f"❌ Ошибка БД при получении пользователей: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# 🔹 Получить пользователя по ID
+
 @router.get("/{user_id}", response_model=UserOut)
 async def get_user(
 	user_id: int,
@@ -62,7 +60,6 @@ async def get_user(
 	logger.info(f"🔎 Получен пользователь ID={user_id}")
 	return user
 
-# 🔹 Добавить нового пользователя (только admin)
 @router.post("/", response_model=UserOut)
 async def create_user(
 	user: UserCreate,
@@ -101,7 +98,6 @@ async def create_user(
 		logger.error(f"❌ Ошибка БД при создании пользователя: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# 🔹 Обновить пользователя (admin или сам пользователь)
 @router.put("/{user_id}", response_model=UserOut)
 async def update_user(
 	user_id: int,
@@ -134,7 +130,6 @@ async def update_user(
 		logger.error(f"❌ Ошибка БД при обновлении пользователя: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# 🔹 Удалить пользователя (только admin)
 @router.delete("/{user_id}")
 async def delete_user(
 	user_id: int,
