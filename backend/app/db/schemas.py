@@ -91,6 +91,14 @@ class SignalORM(Base):
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	direction = Column(Enum(SignalDirection), nullable=False)
 
+	# 🔹 новые колонки для индикаторов
+	obv = Column(Float, nullable=True)
+	stochastic = Column(Float, nullable=True)
+	vwap = Column(Float, nullable=True)
+	ichimoku = Column(Float, nullable=True)
+	volume = Column(Float, nullable=True)
+	bollinger = Column(Float, nullable=True)
+
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="signals")
 

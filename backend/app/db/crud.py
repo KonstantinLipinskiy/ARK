@@ -254,7 +254,14 @@ async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 			direction=signal.direction,
 			user_id=signal.user_id,
 			confidence=signal.confidence,
-			source=signal.source
+			source=signal.source,
+			# 🔹 новые поля индикаторов
+			obv=getattr(signal, "obv", None),
+			stochastic=getattr(signal, "stochastic", None),
+			vwap=getattr(signal, "vwap", None),
+			ichimoku=getattr(signal, "ichimoku", None),
+			volume=getattr(signal, "volume", None),
+			bollinger=getattr(signal, "bollinger", None)
 		)
 		db.add(db_signal)
 		await db.commit()
@@ -264,6 +271,7 @@ async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 		await db.rollback()
 		logger.error(f"Ошибка создания сигнала: {e}")
 		raise
+
 
 async def get_signals(
 	db: AsyncSession,
@@ -310,8 +318,12 @@ async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 	if not db_signal:
 		return None
 
-	allowed_fields = {"symbol", "indicator", "strength", "confidence",
-							"source", "direction", "user_id"}
+	allowed_fields = {
+	"symbol", "indicator", "strength", "confidence",
+	"source", "direction", "user_id",
+	"obv", "stochastic", "vwap", "ichimoku", "volume", "bollinger"
+}
+
 	for key, value in updates.items():
 		if key in allowed_fields:
 			setattr(db_signal, key, value)
@@ -332,8 +344,12 @@ async def patch_signal(db: AsyncSession, signal_id: int, updates: dict):
 	if not db_signal:
 		return None
 
-	allowed_fields = {"symbol", "indicator", "strength", "confidence",
-							"source", "direction", "user_id"}
+	allowed_fields = {
+	"symbol", "indicator", "strength", "confidence",
+	"source", "direction", "user_id",
+	"obv", "stochastic", "vwap", "ichimoku", "volume", "bollinger"
+}
+
 	for key, value in updates.items():
 		if key in allowed_fields and value is not None:
 			setattr(db_signal, key, value)

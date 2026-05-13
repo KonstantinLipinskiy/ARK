@@ -16,18 +16,15 @@ from app.utils.logger import logger
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
-# Инициализация MLService (модель загружается при старте)
 ml_service = MLService()
 try:
 	ml_service.load_model("models/sklearn_model.pkl", model_type="sklearn")
 except Exception:
-	ml_service.model = None  # если модель не загружена, фильтрация не работает
+	ml_service.model = None 
 
-# Инициализация брокеров
 rabbitmq = RabbitMQBroker()
 redis_cache = RedisCache()
 
-# 🔹 Получить все сигналы (с фильтрацией и пагинацией)
 @router.get("/")
 async def get_signals(
 	skip: int = 0,
@@ -58,16 +55,16 @@ async def get_signals(
 		logger.error(f"❌ Ошибка БД при получении сигналов: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# 🔹 Получить сигнал по ID
+
 @router.get("/{signal_id}", response_model=Signal)
 async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
-	result = await crud.update_signal(db, signal_id, {})  # просто загрузка без изменений
+	result = await crud.update_signal(db, signal_id, {}) 
 	if not result:
 		raise HTTPException(status_code=404, detail="Signal not found")
 	logger.info(f"🔎 Получен сигнал ID={signal_id}")
 	return result
 
-# 🔹 Добавить новый сигнал (с ML‑фильтрацией, RabbitMQ, Redis и уведомлением в Telegram)
+
 @router.post("/", response_model=Signal)
 async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 	if signal.direction not in ["buy", "sell"]:
