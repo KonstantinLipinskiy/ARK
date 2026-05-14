@@ -41,12 +41,9 @@ class TradeORM(Base):
 	risk_reason = Column(String(255))           # причина отказа при валидации риска
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	status = Column(Enum(TradeStatus), default=TradeStatus.open)
-
 	exchange_order_id = Column(String(50), unique=True, index=True)
-
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="trades")
-
 	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
 	signal = relationship("SignalORM", back_populates="trades")
 
@@ -99,10 +96,16 @@ class SignalORM(Base):
 	volume = Column(Float, nullable=True)
 	bollinger = Column(Float, nullable=True)
 
+	# 🔹 связи
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="signals")
 
+	# 🔹 новая связь с TradeORM
+	trade_id = Column(Integer, ForeignKey("trades.id", ondelete="SET NULL"), index=True)
+	trade = relationship("TradeORM", back_populates="signal")
+
 	trades = relationship("TradeORM", back_populates="signal", cascade="all, delete-orphan")
+
 
 
 # --- Таблица пользователей ---

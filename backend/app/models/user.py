@@ -3,7 +3,7 @@ from typing import Optional, Dict
 from datetime import datetime
 from typing_extensions import Literal
 
-# 🔹 Основная модель пользователя
+
 class User(BaseModel):
 	id: Optional[int] = Field(None, description="ID пользователя (генерируется БД)")
 	username: str = Field(..., min_length=3, max_length=50, description="Имя пользователя")
@@ -12,13 +12,12 @@ class User(BaseModel):
 	status: Literal["active", "blocked"] = Field(default="active", description="Статус пользователя")
 	created_at: datetime = Field(default_factory=datetime.utcnow, description="Дата регистрации")
 
-	# 🔹 Новые поля
-	password_hash: Optional[str] = Field(None, description="Хэш пароля для аутентификации")
-	salt: Optional[str] = Field(None, description="Соль для хэширования пароля")
+	password_hash: str = Field(..., description="Хэш пароля для аутентификации")
+	salt: str = Field(..., description="Соль для хэширования пароля")
 	telegram_id: Optional[str] = Field(None, description="Telegram ID для интеграции с ботом")
 	is_admin: bool = Field(default=False, description="Флаг администратора")
 	last_login: Optional[datetime] = Field(None, description="Дата последнего входа")
-	updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Дата последнего обновления")
+	updated_at: datetime = Field(default_factory=datetime.utcnow, description="Дата последнего обновления")
 	settings: Optional[Dict] = Field(
 		default_factory=dict,
 		description="Настройки пользователя (например, risk_profile и notifications_enabled)"
@@ -45,7 +44,7 @@ class User(BaseModel):
 			}
 		}
 
-# 🔹 Схема для регистрации (принимает пароль в открытом виде)
+
 class UserCreate(BaseModel):
 	username: str = Field(..., min_length=3, max_length=50, description="Имя пользователя")
 	email: EmailStr = Field(..., description="Email пользователя")
@@ -74,7 +73,7 @@ class UserCreate(BaseModel):
 			}
 		}
 
-# 🔹 Схема для логина
+
 class UserLogin(BaseModel):
 	email: EmailStr = Field(..., description="Email пользователя")
 	password: str = Field(..., min_length=6, description="Пароль пользователя")
@@ -87,7 +86,7 @@ class UserLogin(BaseModel):
 			}
 		}
 
-# 🔹 Схема для возврата данных (без пароля и соли)
+
 class UserOut(BaseModel):
 	id: int
 	username: str

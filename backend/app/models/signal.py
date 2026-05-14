@@ -1,11 +1,10 @@
-# app/models/signal.py
 from pydantic import BaseModel, Field, validator
 from datetime import datetime
 from typing import Optional
 from typing_extensions import Literal
 import enum
 
-# Enum для индикаторов
+
 class IndicatorEnum(str, enum.Enum):
 	RSI = "RSI"
 	EMA = "EMA"
@@ -27,13 +26,12 @@ class Signal(BaseModel):
 	timestamp: datetime = Field(default_factory=datetime.utcnow, description="Время генерации сигнала")
 	direction: Literal["buy", "sell"] = Field(..., description="Направление: buy или sell")
 
-	# 🔹 Новые поля для связки с пользователем и сделкой
 	user_id: Optional[int] = Field(None, description="ID пользователя, для которого сигнал")
 	trade_id: Optional[int] = Field(None, description="ID сделки, связанной с сигналом")
+
 	confidence: Optional[float] = Field(None, ge=0, le=1, description="Доверие к сигналу")
 	source: Optional[str] = Field(None, description="Источник сигнала (стратегия или внешний сервис)")
 
-	# 🔹 Добавленные индикаторы для ML
 	obv: Optional[float] = Field(None, description="On-Balance Volume")
 	stochastic: Optional[float] = Field(None, description="Stochastic Oscillator")
 	vwap: Optional[float] = Field(None, description="Volume Weighted Average Price")
@@ -41,7 +39,6 @@ class Signal(BaseModel):
 	volume: Optional[float] = Field(None, description="Trading volume")
 	bollinger: Optional[float] = Field(None, description="Bollinger Bands value")
 
-	# 🔹 Валидаторы
 	@validator("timestamp")
 	def validate_timestamp(cls, v: datetime) -> datetime:
 		"""Проверка, что timestamp не в будущем."""
@@ -75,7 +72,6 @@ class Signal(BaseModel):
 					"trade_id": 42,
 					"confidence": 0.9,
 					"source": "EMA+RSI strategy",
-					# 🔹 Пример значений новых индикаторов
 					"obv": 12345.0,
 					"stochastic": 0.72,
 					"vwap": 1850.5,
