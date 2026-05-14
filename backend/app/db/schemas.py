@@ -1,10 +1,8 @@
-# app/db/schemas.py
 from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, JSON
 from sqlalchemy.orm import relationship
 import enum
 from app.db.base import Base
 
-# --- Enum'ы ---
 class TradeStatus(enum.Enum):
 	open = "open"
 	closed = "closed"
@@ -22,7 +20,6 @@ class UserStatus(enum.Enum):
 	active = "active"
 	blocked = "blocked"
 
-# --- Таблица сделок ---
 class TradeORM(Base):
 	__tablename__ = "trades"
 
@@ -31,14 +28,14 @@ class TradeORM(Base):
 	side = Column(String(10), nullable=False)   # buy/sell
 	amount = Column(Float, nullable=False)
 	price = Column(Float, nullable=False)
-	entry_price = Column(Float)                 # цена входа
-	exit_price = Column(Float)                  # цена выхода
-	profit_loss = Column(Float)                 # PnL
-	leverage = Column(Float, default=1.0)       # плечо
-	stop_loss = Column(Float)                   # стоп-лосс %
-	take_profit = Column(Float)                 # тейк-профит %
-	confidence_score = Column(Float)            # доверие ML модели
-	risk_reason = Column(String(255))           # причина отказа при валидации риска
+	entry_price = Column(Float)
+	exit_price = Column(Float)
+	profit_loss = Column(Float)
+	leverage = Column(Float, default=1.0)
+	stop_loss = Column(Float)
+	take_profit = Column(Float)
+	confidence_score = Column(Float)
+	risk_reason = Column(String(255))
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	status = Column(Enum(TradeStatus), default=TradeStatus.open)
 	exchange_order_id = Column(String(50), unique=True, index=True)
@@ -48,7 +45,6 @@ class TradeORM(Base):
 	signal = relationship("SignalORM", back_populates="trades")
 
 
-# --- Таблица тестовых сделок (бэктесты) ---
 class BacktestTradeORM(Base):
 	__tablename__ = "backtest_trades"
 
@@ -66,16 +62,13 @@ class BacktestTradeORM(Base):
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	status = Column(Enum(TradeStatus), default=TradeStatus.open)
 
-	# связь с пользователем
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="backtest_trades")
 
-	# связь с сигналом
 	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
-	signal = relationship("SignalORM")
+	signal = relationship("SignalORM", back_populates="backtest_trades")
 
 
-# --- Таблица сигналов ---
 class SignalORM(Base):
 	__tablename__ = "signals"
 
@@ -88,7 +81,6 @@ class SignalORM(Base):
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	direction = Column(Enum(SignalDirection), nullable=False)
 
-	# 🔹 новые колонки для индикаторов
 	obv = Column(Float, nullable=True)
 	stochastic = Column(Float, nullable=True)
 	vwap = Column(Float, nullable=True)
@@ -96,19 +88,14 @@ class SignalORM(Base):
 	volume = Column(Float, nullable=True)
 	bollinger = Column(Float, nullable=True)
 
-	# 🔹 связи
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="signals")
 
-	# 🔹 новая связь с TradeORM
-	trade_id = Column(Integer, ForeignKey("trades.id", ondelete="SET NULL"), index=True)
-	trade = relationship("TradeORM", back_populates="signal")
-
 	trades = relationship("TradeORM", back_populates="signal", cascade="all, delete-orphan")
 
+	backtest_trades = relationship("BacktestTradeORM", back_populates="signal", cascade="all, delete-orphan")
 
 
-# --- Таблица пользователей ---
 class UserORM(Base):
 	__tablename__ = "users"
 
@@ -135,8 +122,9 @@ class UserORM(Base):
 	backtest_reports = relationship("BacktestReport", back_populates="user", cascade="all, delete-orphan")
 	backtest_trades = relationship("BacktestTradeORM", back_populates="user", cascade="all, delete-orphan")
 
+	refresh_tokens = relationship("RefreshTokenORM", back_populates="user", cascade="all, delete-orphan")
 
-# --- Таблица логов риск-менеджмента ---
+
 class RiskLog(Base):
 	__tablename__ = "risk_logs"
 
@@ -148,7 +136,6 @@ class RiskLog(Base):
 	timestamp = Column(DateTime, server_default=func.now())
 
 
-# --- Таблица отчётов бэктеста ---
 class BacktestReport(Base):
 	__tablename__ = "backtest_reports"
 
@@ -165,7 +152,6 @@ class BacktestReport(Base):
 	user = relationship("UserORM", back_populates="backtest_reports")
 
 
-# --- Таблица стратегий ---
 class StrategyORM(Base):
 	__tablename__ = "strategies"
 
@@ -196,7 +182,6 @@ class StrategyORM(Base):
 	strength_multiplier = Column(Float, nullable=False, default=1.0)
 
 
-# --- Таблица настроек риск-менеджмента ---
 class RiskSettingsORM(Base):
 	__tablename__ = "risk_settings"
 
@@ -213,7 +198,6 @@ class RiskSettingsORM(Base):
 	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
-# --- Таблица индикаторов ---
 class IndicatorORM(Base):
 	__tablename__ = "indicators"
 
@@ -224,7 +208,6 @@ class IndicatorORM(Base):
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 
 
-# --- Таблица refresh токенов ---
 class RefreshTokenORM(Base):
 	__tablename__ = "refresh_tokens"
 
@@ -233,6 +216,5 @@ class RefreshTokenORM(Base):
 	created_at = Column(DateTime, server_default=func.now())
 	expires_at = Column(DateTime, nullable=False)
 
-	# связь с пользователем
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="refresh_tokens")
