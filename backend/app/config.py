@@ -38,11 +38,7 @@ class Settings(BaseSettings):
 	ALLOWED_ORIGINS: list[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 
-
-
 settings = Settings()
-
-DATABASE_URL = settings.DATABASE_URL
 
 
 RABBITMQ_CONFIG = {
