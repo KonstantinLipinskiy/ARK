@@ -1,4 +1,3 @@
-# app/api/routes_indicators.py
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,14 +23,12 @@ class IndicatorTask(BaseModel):
 	indicator: str
 	kwargs: dict
 
-# 🔹 POST /indicators/calculate
 @router.post("/calculate")
 async def calculate_indicator(task: IndicatorTask, request: Request):
 	"""
 	Кладёт задачу расчёта индикатора в очередь RabbitMQ и пишет статус в Redis.
 	"""
 	try:
-		# Валидация индикатора
 		IndicatorFactory.validate_indicator(task.indicator)
 
 		broker = RabbitMQBroker()
@@ -46,17 +43,14 @@ async def calculate_indicator(task: IndicatorTask, request: Request):
 			"user_id": getattr(request.state, "user_id", None)
 		}
 
-		# Метрики: время постановки
 		start_time = time.time()
 
 		await broker.publish_indicator(payload)
 		await broker.close()
 
-		# Записываем статус в Redis
 		redis = RedisCache()
 		await redis.set_task_status(task_id, "queued")
 
-		# Метрики Prometheus
 		indicators_tasks_total.inc()
 		indicators_queue_time.observe(time.time() - start_time)
 
@@ -71,7 +65,6 @@ async def calculate_indicator(task: IndicatorTask, request: Request):
 		logger.error(f"❌ Failed to enqueue indicator task: {e}")
 		raise HTTPException(status_code=500, detail="Failed to enqueue indicator task")
 
-# 🔹 GET /indicators/{pair}
 @router.get("/{pair}")
 async def get_indicators(pair: str, db: AsyncSession = Depends(get_db)):
 	"""
@@ -84,7 +77,6 @@ async def get_indicators(pair: str, db: AsyncSession = Depends(get_db)):
 		logger.error(f"❌ Failed to fetch indicators for {pair}: {e}")
 		raise HTTPException(status_code=500, detail="Failed to fetch indicators")
 
-# 🔹 GET /indicators/status/{task_id}
 @router.get("/status/{task_id}")
 async def get_indicator_status(task_id: str):
 	"""

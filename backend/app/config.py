@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 	JWT_SECRET: str = os.getenv("JWT_SECRET", "default_secret")
 	JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
 	JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", 60))
+	REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
+
 
 	# 🔹 Централизованная конфигурация биржи
 	EXCHANGE_CONFIG: ClassVar[dict] = {
@@ -34,6 +36,8 @@ class Settings(BaseSettings):
 	}
 
 	ALLOWED_ORIGINS: list[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
+
 
 
 settings = Settings()

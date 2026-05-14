@@ -8,14 +8,15 @@ from app.db.session import get_db
 from app.db.schemas import UserORM, TradeORM, SignalORM, StrategyORM
 from app.services.strategy_service import load_strategies, add_strategy, update_strategy, delete_strategy, toggle_strategy
 from app.services.risk_service import load_risk_settings, update_risk_settings
-from app.utils.auth import get_current_admin  # проверка JWT и роли admin
+from app.utils.auth import get_current_admin
 from app.utils.logger import logger
 from app.utils.metrics import calculate_metrics
 from app.services.telegram import telegram_service
 
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-# 🔹 Получить общую статистику бота
+
 @router.get("/stats")
 async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	try:
@@ -28,7 +29,6 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 		active_positions = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "open"))
 		cancelled_trades = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "cancelled"))
 
-		# 🔹 Дополнительные метрики через calculate_metrics
 		result = await db.execute(select(TradeORM))
 		trades = result.scalars().all()
 		metrics = calculate_metrics(trades)
@@ -52,7 +52,7 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 		logger.error(f"❌ Ошибка БД при получении статистики: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# 🔹 Управление пользователями (например, блокировка)
+
 @router.post("/block_user/{user_id}")
 async def block_user(user_id: int, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	result = await db.execute(select(UserORM).filter(UserORM.id == user_id))
@@ -71,12 +71,12 @@ async def block_user(user_id: int, db: AsyncSession = Depends(get_db), current_a
 		logger.error(f"❌ Ошибка БД при блокировке пользователя: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# 🔹 Получить список стратегий
+
 @router.get("/strategies")
 async def get_strategies(db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	return await load_strategies(db, use_cache=False)
 
-# 🔹 Добавить стратегию
+
 @router.post("/strategies")
 async def create_strategy(strategy_data: dict, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	strategy = await add_strategy(db, strategy_data)
@@ -85,7 +85,7 @@ async def create_strategy(strategy_data: dict, db: AsyncSession = Depends(get_db
 	logger.info(f"✅ Стратегия {strategy.symbol} добавлена админом")
 	return {"detail": f"Strategy {strategy.symbol} added"}
 
-# 🔹 Обновить стратегию
+
 @router.put("/strategies/{symbol}")
 async def edit_strategy(symbol: str, updates: dict, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	strategy = await update_strategy(db, symbol, updates)
@@ -94,7 +94,7 @@ async def edit_strategy(symbol: str, updates: dict, db: AsyncSession = Depends(g
 	logger.info(f"♻️ Стратегия {symbol} обновлена админом")
 	return {"detail": f"Strategy {symbol} updated"}
 
-# 🔹 Удалить стратегию
+
 @router.delete("/strategies/{symbol}")
 async def remove_strategy(symbol: str, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	success = await delete_strategy(db, symbol)
@@ -103,7 +103,7 @@ async def remove_strategy(symbol: str, db: AsyncSession = Depends(get_db), curre
 	logger.info(f"🗑️ Стратегия {symbol} удалена админом")
 	return {"detail": f"Strategy {symbol} deleted"}
 
-# 🔹 Переключить стратегию (toggle)
+
 @router.post("/strategies/{symbol}/toggle")
 async def toggle_strategy_endpoint(symbol: str, enabled: bool, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	strategy = await toggle_strategy(db, symbol, enabled)
@@ -113,12 +113,12 @@ async def toggle_strategy_endpoint(symbol: str, enabled: bool, db: AsyncSession 
 	logger.info(f"🔀 Стратегия {symbol} переключена: {status}")
 	return {"detail": f"Strategy {symbol} {status}"}
 
-# 🔹 Получить текущие параметры риска (из БД)
+
 @router.get("/risk")
 async def get_risk(db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	return await load_risk_settings(db)
 
-# 🔹 Обновить параметры риска (в БД)
+
 @router.put("/risk")
 async def update_risk(updates: dict, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	new_config = await update_risk_settings(db, updates)
