@@ -1,4 +1,3 @@
-# app/db/crud.py
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -255,7 +254,6 @@ async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 			user_id=signal.user_id,
 			confidence=signal.confidence,
 			source=signal.source,
-			# 🔹 новые поля индикаторов
 			obv=getattr(signal, "obv", None),
 			stochastic=getattr(signal, "stochastic", None),
 			vwap=getattr(signal, "vwap", None),
@@ -425,7 +423,6 @@ async def get_users(
 	if role:
 		query = query.filter(schemas.UserORM.role == role)
 
-	# Подсчёт общего количества пользователей
 	total_count = await db.scalar(
 		select(func.count()).select_from(query.subquery())
 	)
