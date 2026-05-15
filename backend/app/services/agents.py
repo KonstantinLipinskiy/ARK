@@ -101,6 +101,11 @@ class AgentsService:
 					name="Vector Search",
 					func=self.search_vector,
 					description="Поиск по эмбеддингам сигналов и сделок"
+			),
+			Tool(
+					name="Vector Search with Filter",
+					func=self.search_vector_with_filter,
+					description="Поиск по эмбеддингам с фильтрацией по payload (например, стратегия, пользователь)"
 			)
 		]
 
@@ -146,8 +151,30 @@ class AgentsService:
 			results = self.vector.search(vector, top_k)
 			return f"Vector search in {collection}: {results}"
 		except Exception as e:
-			logger.error(f"Ошибка поиска векторной базы: {e}")
+			logger.error(f"Ошибка поиска векторной базы: {e}", extra={"operation": "search", "collection": query.get("collection")})
 			return "Ошибка поиска"
+
+	def search_vector_with_filter(self, query: dict) -> str:
+		"""
+		Поиск по эмбеддингам с фильтрацией.
+		query = {
+			"vector": [...],
+			"collection": "signals",
+			"filters": {"strategy": "scalping", "user_id": 123},
+			"top_k": 5
+		}
+		"""
+		try:
+			collection = query.get("collection", "signals")
+			self.vector.use_collection(collection)
+			vector = query.get("vector")
+			filters = query.get("filters", {})
+			top_k = query.get("top_k", 5)
+			results = self.vector.search_with_filter(vector, filters, top_k)
+			return f"Filtered vector search in {collection} with {filters}: {results}"
+		except Exception as e:
+			logger.error(f"Ошибка поиска с фильтром: {e}", extra={"operation": "search_with_filter", "collection": query.get("collection")})
+			return "Ошибка поиска с фильтром"
 
 	def run_agent(self, query: str) -> str:
 		logger.info(f"Запуск агента с запросом: {query}")

@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from logging.handlers import TimedRotatingFileHandler
 from app.services.telegram import telegram_service
 
@@ -21,8 +22,6 @@ class TelegramHandler(logging.Handler):
 			log_entry = self.format(record)
 			telegram_id = os.getenv("ADMIN_TELEGRAM_ID", "")
 			if telegram_id:
-					# Отправляем сообщение через telegram_service
-					# emit синхронный, поэтому используем run_until_complete
 					import asyncio
 					loop = asyncio.get_event_loop()
 					if loop.is_running():
@@ -43,13 +42,29 @@ class TelegramHandler(logging.Handler):
 			logging.error(f"Failed to send Telegram alert: {e}")
 
 # -------------------------------------------------------------------
+# JSON Formatter для Qdrant логов
+# -------------------------------------------------------------------
+class JSONFormatter(logging.Formatter):
+	def format(self, record):
+		log_record = {
+			"timestamp": self.formatTime(record, self.datefmt),
+			"level": record.levelname,
+			"logger": record.name,
+			"message": record.getMessage(),
+			"service": "Qdrant",
+			"operation": getattr(record, "operation", None),
+			"collection": getattr(record, "collection", None),
+		}
+		return json.dumps(log_record, ensure_ascii=False)
+
+# -------------------------------------------------------------------
 # Настройка логирования
 # -------------------------------------------------------------------
 def setup_logger():
 	"""
 	Настройка логирования:
 	- Ротация логов (ежедневно)
-	- Разделение логов (общие, ошибки, сделки)
+	- Разделение логов (общие, ошибки, сделки, Qdrant)
 	- Расширенный формат (user_id, symbol, trade_id)
 	- Отправка CRITICAL ошибок в Telegram
 	"""
@@ -79,6 +94,13 @@ def setup_logger():
 	trades_handler.setFormatter(formatter)
 	trades_handler.setLevel(logging.INFO)
 
+	# Лог ошибок Qdrant (JSON формат)
+	qdrant_handler = TimedRotatingFileHandler(
+		os.path.join(LOG_DIR, "qdrant.log"), when="midnight", backupCount=7, encoding="utf-8"
+	)
+	qdrant_handler.setFormatter(JSONFormatter())
+	qdrant_handler.setLevel(logging.ERROR)
+
 	# Telegram handler для CRITICAL ошибок
 	telegram_handler = TelegramHandler()
 	telegram_handler.setFormatter(formatter)
@@ -89,6 +111,7 @@ def setup_logger():
 	logger.addHandler(general_handler)
 	logger.addHandler(error_handler)
 	logger.addHandler(trades_handler)
+	logger.addHandler(qdrant_handler)
 	logger.addHandler(telegram_handler)
 
 	return logger

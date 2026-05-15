@@ -25,7 +25,6 @@ class Settings(BaseSettings):
 	JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", 60))
 	REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 
-
 	# 🔹 Централизованная конфигурация биржи
 	EXCHANGE_CONFIG: ClassVar[dict] = {
 		"name": "bybit",
@@ -36,6 +35,15 @@ class Settings(BaseSettings):
 	}
 
 	ALLOWED_ORIGINS: list[str] = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
+	# 🔹 Qdrant настройки
+	QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
+	QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", 6333))
+	QDRANT_COLLECTION: str = os.getenv("QDRANT_COLLECTION", "arkbot_vectors")
+
+	# 🔹 Параметры векторов
+	QDRANT_VECTOR_SIZE: int = int(os.getenv("QDRANT_VECTOR_SIZE", 768))
+	QDRANT_DISTANCE: str = os.getenv("QDRANT_DISTANCE", "COSINE")
 
 
 settings = Settings()

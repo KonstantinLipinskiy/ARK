@@ -50,6 +50,7 @@ async def get_balance(currency: str = "USDT"):
 # --- ML FEATURES ---
 def build_features(symbol: str, price: float) -> dict:
     """Формируем признаки для ML модели (пример)."""
+
     return {
         "ema": 25.3,
         "rsi": 62.1,
@@ -57,6 +58,24 @@ def build_features(symbol: str, price: float) -> dict:
         "hour": datetime.utcnow().hour,
         "atr": 0.012,
     }
+
+
+# Хочешь, я соберу полный рабочий кусок orders.py с обновлённым build_features, чтобы ты видел, как он будет выглядеть в боевом режиме?
+
+
+# --- ML FEATURES ---
+# async def build_features(symbol: str, price: float) -> dict:
+#     """
+#     Формируем признаки для ML модели на основе реальных свечей.
+#     """
+#     # Берём последние 100 часовых свечей
+#     candles = await get_ohlcv(symbol, timeframe="1h", limit=100)
+
+#     # Готовим признаки через MLService
+#     features = ml_service.prepare_data(candles)
+
+#     return features
+
 
 # --- ORDERS ---
 async def create_order(

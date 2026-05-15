@@ -15,6 +15,13 @@ from app.utils.metrics import (
 )
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
+from app.db.vector import (
+	VECTOR_POINTS_TOTAL,
+	VECTOR_SEARCH_TOTAL,
+	VECTOR_ERRORS_TOTAL,
+	VECTOR_SEARCH_LATENCY,
+	VectorDB,
+)
 
 router = APIRouter()
 
@@ -148,6 +155,14 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	except Exception:
 		indicators_tasks_errors.inc()
 
+	# --- Метрики Qdrant ---
+	try:
+		vector_db = VectorDB()
+		VECTOR_POINTS_TOTAL.labels(collection=vector_db.collection_name).set(vector_db.count_points())
+		# Поиск/ошибки/latency обновляются автоматически внутри vector.py
+	except Exception:
+		VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="metrics").inc()
+
 	return Response(generate_latest(), media_type="text/plain")
 
 # 🔹 Логирование ошибок
@@ -155,3 +170,4 @@ def log_error():
 	errors_counter.inc()
 	rabbitmq_errors_total.inc()
 	indicators_tasks_errors.inc()
+	VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="general").inc()
