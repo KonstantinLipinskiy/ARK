@@ -1,9 +1,8 @@
-# app/db/vector.py
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from app.utils.logger import logger
 from prometheus_client import Gauge, Counter, Histogram
-from app.config import settings   # 🔹 теперь используем централизованный конфиг
+from app.config import settings
 
 # 🔹 Метрики для Prometheus
 VECTOR_POINTS_TOTAL = Gauge("vector_points_total", "Total points in Qdrant collection", ["collection"])
@@ -14,7 +13,6 @@ VECTOR_SEARCH_LATENCY = Histogram("vector_search_latency_seconds", "Search laten
 class VectorDB:
 	def __init__(self):
 		try:
-			# 🔹 Подключение к Qdrant через параметры из settings
 			self.client = QdrantClient(
 					host=settings.QDRANT_HOST,
 					port=settings.QDRANT_PORT
@@ -28,13 +26,11 @@ class VectorDB:
 			raise
 
 	def use_collection(self, name: str):
-		"""Переключение на другую коллекцию (signals, trades, news, reports, strategies)."""
 		self.collection_name = name
 		self._init_collection()
 		logger.info(f"Переключено на коллекцию: {self.collection_name}")
 
 	def _init_collection(self):
-		"""Создаёт коллекцию, если она не существует (без пересоздания)."""
 		try:
 			collections = [c.name for c in self.client.get_collections().collections]
 			if self.collection_name not in collections:
@@ -50,8 +46,15 @@ class VectorDB:
 			VECTOR_ERRORS_TOTAL.labels(collection=self.collection_name, operation="init").inc()
 
 	def insert_vector(self, vector: list[float], payload: dict):
-		"""Добавляет один эмбеддинг в Qdrant."""
+		"""Добавляет один эмбеддинг в Qdrant с базовой проверкой."""
 		try:
+			if not payload or "id" not in payload:
+					logger.warning("Пропуск вставки: пустой payload или отсутствует id")
+					return {"status": "skipped", "reason": "invalid payload"}
+			if vector is None or len(vector) == 0:
+					logger.warning(f"Пропуск вставки: пустой или None vector для id={payload.get('id')}")
+					return {"status": "skipped", "reason": "invalid vector"}
+
 			self.client.upsert(
 					collection_name=self.collection_name,
 					points=[models.PointStruct(id=payload.get("id"), vector=vector, payload=payload)]
@@ -64,12 +67,22 @@ class VectorDB:
 			return {"error": str(e)}
 
 	def batch_insert(self, vectors: list[list[float]], payloads: list[dict]):
-		"""Массовая вставка эмбеддингов."""
+		"""Массовая вставка эмбеддингов с фильтрацией пустых данных."""
 		try:
-			points = [
-					models.PointStruct(id=p.get("id"), vector=v, payload=p)
-					for v, p in zip(vectors, payloads)
-			]
+			points = []
+			for v, p in zip(vectors, payloads):
+					if not p or "id" not in p:
+						logger.warning("Пропуск batch insert: пустой payload или отсутствует id")
+						continue
+					if v is None or len(v) == 0:
+						logger.warning(f"Пропуск batch insert: пустой или None vector для id={p.get('id')}")
+						continue
+					points.append(models.PointStruct(id=p.get("id"), vector=v, payload=p))
+
+			if not points:
+					logger.warning("Batch insert пропущен: нет валидных точек")
+					return {"status": "skipped", "reason": "no valid points"}
+
 			self.client.upsert(collection_name=self.collection_name, points=points)
 			logger.info(f"Batch insert: {len(points)} эмбеддингов")
 			VECTOR_POINTS_TOTAL.labels(collection=self.collection_name).set(self.count_points())
@@ -79,8 +92,10 @@ class VectorDB:
 			return {"error": str(e)}
 
 	def update_vector(self, point_id: int, vector: list[float] = None, payload: dict = None):
-		"""Обновляет существующий эмбеддинг или payload."""
 		try:
+			if payload is None and vector is None:
+					logger.warning(f"Пропуск обновления: пустые данные для id={point_id}")
+					return {"status": "skipped", "reason": "empty update"}
 			self.client.upsert(
 					collection_name=self.collection_name,
 					points=[models.PointStruct(id=point_id, vector=vector, payload=payload)]
@@ -92,8 +107,10 @@ class VectorDB:
 			return {"error": str(e)}
 
 	def search(self, query_vector: list[float], top_k: int = 5):
-		"""Поиск ближайших эмбеддингов."""
 		try:
+			if query_vector is None or len(query_vector) == 0:
+					logger.warning("Поиск пропущен: пустой query_vector")
+					return []
 			with VECTOR_SEARCH_LATENCY.labels(collection=self.collection_name).time():
 					results = self.client.search(
 						collection_name=self.collection_name,
@@ -108,8 +125,10 @@ class VectorDB:
 			return {"error": str(e)}
 
 	def search_with_filter(self, query_vector: list[float], filters: dict, top_k: int = 5):
-		"""Поиск с фильтрацией по payload."""
 		try:
+			if query_vector is None or len(query_vector) == 0:
+					logger.warning("Поиск с фильтром пропущен: пустой query_vector")
+					return []
 			qdrant_filter = models.Filter(
 					must=[models.FieldCondition(key=k, match=models.MatchValue(value=v)) for k, v in filters.items()]
 			)
@@ -128,7 +147,6 @@ class VectorDB:
 			return {"error": str(e)}
 
 	def count_points(self) -> int:
-		"""Подсчёт количества точек в коллекции."""
 		try:
 			info = self.client.get_collection(self.collection_name)
 			return info.points_count
@@ -138,7 +156,6 @@ class VectorDB:
 			return 0
 
 	def delete(self, point_id: int):
-		"""Удаляет точку по ID."""
 		try:
 			self.client.delete(
 					collection_name=self.collection_name,
@@ -152,7 +169,6 @@ class VectorDB:
 			return {"error": str(e)}
 
 	def drop_collection(self):
-		"""Удаляет всю коллекцию (для тестов или пересоздания)."""
 		try:
 			self.client.delete_collection(self.collection_name)
 			logger.info(f"Коллекция {self.collection_name} удалена")
