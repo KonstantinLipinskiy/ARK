@@ -1,20 +1,20 @@
-# app/services/indicators.py
 import pandas as pd
 import numpy as np
 from numba import njit
+
 
 def validate_series(series: pd.Series, period: int) -> bool:
 	"""Проверка, что серия достаточной длины и не пустая."""
 	return series is not None and len(series.dropna()) >= period
 
-# EMA (Exponential Moving Average)
+
 def ema(series: pd.Series, period: int = 14) -> pd.Series:
 	"""Экспоненциальное скользящее среднее (EMA)."""
 	if not validate_series(series, period):
 		return pd.Series(dtype=float, index=series.index)
 	return series.ewm(span=period, adjust=False).mean()
 
-# RSI (Relative Strength Index)
+
 def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 	"""Индекс относительной силы (RSI)."""
 	if not validate_series(series, period):
@@ -25,7 +25,7 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 	rs = gain / loss.replace(0, np.nan)
 	return 100 - (100 / (1 + rs))
 
-# MACD (Moving Average Convergence Divergence)
+
 def macd(series: pd.Series, short: int = 12, long: int = 26, signal: int = 9):
 	"""MACD: линия и сигнальная линия."""
 	if not validate_series(series, long):
@@ -36,7 +36,7 @@ def macd(series: pd.Series, short: int = 12, long: int = 26, signal: int = 9):
 	signal_line = macd_line.ewm(span=signal, adjust=False).mean()
 	return macd_line, signal_line
 
-# Bollinger Bands
+
 def bollinger(series: pd.Series, period: int = 20, std_dev: float = 2):
 	"""Полосы Боллинджера: верхняя, SMA, нижняя."""
 	if not validate_series(series, period):
@@ -49,7 +49,6 @@ def bollinger(series: pd.Series, period: int = 20, std_dev: float = 2):
 	lower_band = sma - (std_dev * std)
 	return upper_band, sma, lower_band
 
-# ---------- Numba оптимизация ----------
 
 @njit
 def _atr_numba(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarray:
@@ -62,12 +61,14 @@ def _atr_numba(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarr
 		tr[i] = max(tr1, tr2, tr3)
 	return tr
 
+
 def atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
 	"""Средний истинный диапазон (ATR)."""
 	if not validate_series(close, period):
 		return pd.Series(dtype=float, index=close.index)
 	tr = _atr_numba(high.values, low.values, close.values)
 	return pd.Series(tr, index=close.index).rolling(window=period).mean()
+
 
 @njit
 def _obv_numba(close: np.ndarray, volume: np.ndarray) -> np.ndarray:
@@ -81,6 +82,7 @@ def _obv_numba(close: np.ndarray, volume: np.ndarray) -> np.ndarray:
 			obv[i] = obv[i - 1]
 	return obv
 
+
 def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
 	"""On-Balance Volume (OBV)."""
 	if not validate_series(close, 2):
@@ -88,7 +90,7 @@ def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
 	obv_values = _obv_numba(close.values, volume.values)
 	return pd.Series(obv_values, index=close.index)
 
-# Stochastic Oscillator
+
 def stochastic(close: pd.Series, high: pd.Series, low: pd.Series, period: int = 14) -> pd.Series:
 	"""Стохастический осциллятор (%K)."""
 	if not validate_series(close, period):
@@ -97,14 +99,14 @@ def stochastic(close: pd.Series, high: pd.Series, low: pd.Series, period: int = 
 	highest_high = high.rolling(window=period).max()
 	return 100 * (close - lowest_low) / (highest_high - lowest_low)
 
-# Volume SMA (Simple Moving Average of Volume)
+
 def volume_sma(volume: pd.Series, period: int = 20) -> pd.Series:
 	"""SMA по объёму."""
 	if not validate_series(volume, period):
 		return pd.Series(dtype=float, index=volume.index)
 	return volume.rolling(window=period).mean()
 
-# VWAP (Volume Weighted Average Price)
+
 def vwap(close: pd.Series, volume: pd.Series) -> pd.Series:
 	"""VWAP: средневзвешенная цена по объёму."""
 	if not validate_series(close, 2):
@@ -113,7 +115,7 @@ def vwap(close: pd.Series, volume: pd.Series) -> pd.Series:
 	cum_vol_price = (close * volume).cumsum()
 	return cum_vol_price / cum_vol.replace(0, np.nan)
 
-# Ichimoku Cloud
+
 def ichimoku(high: pd.Series, low: pd.Series, close: pd.Series):
 	"""Индикатор Ichimoku Cloud: линии Tenkan, Kijun, Senkou A/B, Chikou."""
 	if not validate_series(close, 52):

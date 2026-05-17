@@ -4,7 +4,6 @@ from app.utils.logger import logger
 from prometheus_client import Gauge, Counter, Histogram
 from app.config import settings
 
-# 🔹 Метрики для Prometheus
 VECTOR_POINTS_TOTAL = Gauge("vector_points_total", "Total points in Qdrant collection", ["collection"])
 VECTOR_SEARCH_TOTAL = Counter("vector_search_total", "Total search queries in Qdrant", ["collection"])
 VECTOR_ERRORS_TOTAL = Counter("vector_errors_total", "Total errors in Qdrant operations", ["collection", "operation"])
