@@ -1,4 +1,3 @@
-# app/services/indicator_factory.py
 import pandas as pd
 import inspect
 import asyncio
@@ -18,7 +17,6 @@ class IndicatorFactory:
 		"Bollinger": indicators.bollinger,
 		"ATR": indicators.atr,
 		"OBV": indicators.obv,
-		# расширенные индикаторы
 		"Stochastic": indicators.stochastic,
 		"VolumeSMA": indicators.volume_sma,
 		"VWAP": indicators.vwap,
@@ -61,7 +59,6 @@ class IndicatorFactory:
 		cls.validate_indicator(name)
 		func = cls._registry[name]
 
-		# Валидация входных данных
 		cls._validate_inputs(kwargs)
 
 		try:
@@ -110,7 +107,6 @@ class IndicatorFactory:
 					if len(value) < 5:
 						raise ValueError(f"❌ Series {key} too short for calculation")
 
-		# Дополнительная проверка параметров
 		if "period" in kwargs:
 			period = kwargs["period"]
 			if not isinstance(period, int) or period <= 0:

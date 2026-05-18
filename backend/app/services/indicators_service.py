@@ -1,9 +1,8 @@
-# app/services/indicators_service.py
 import asyncio
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.indicator_factory import IndicatorFactory
-from app.db.schemas import IndicatorORM  # ORM таблица indicators
+from app.db.schemas import IndicatorORM
 from app.utils.logger import logger
 from app.cache.redis import RedisCache
 
@@ -25,16 +24,12 @@ class IndicatorsService:
 		Асинхронный расчёт индикатора и сохранение результата в БД + Redis.
 		"""
 		try:
-			# Валидация входных данных
 			self._validate_inputs(kwargs)
 
-			# Асинхронный расчёт индикатора через фабрику
 			result = await IndicatorFactory.calculate_async(indicator_name, **kwargs)
 
-			# Сохранение в БД
 			await self._save_to_db(pair, indicator_name, result)
 
-			# Публикация в Redis (для воркеров/уведомлений)
 			await self._publish_to_redis(pair, indicator_name, result)
 
 			logger.info(f"✅ Indicator {indicator_name} успешно рассчитан и сохранён | Параметры: {kwargs}")
@@ -83,7 +78,7 @@ class IndicatorsService:
 					if attempt > retries:
 						logger.error(f"❌ DB save failed after {retries+1} attempts for {indicator_name}")
 						return
-					await asyncio.sleep(1)  # небольшая пауза перед повтором
+					await asyncio.sleep(1) 
 
 	async def _publish_to_redis(self, pair: str, indicator_name: str, result, retries: int = 2):
 		"""
@@ -135,7 +130,7 @@ class IndicatorsService:
 						raise ValueError(f"❌ Series {key} contains only NaN")
 					if len(value) < 5:
 						raise ValueError(f"❌ Series {key} too short for calculation")
-		# Дополнительная проверка параметров
+
 		if "period" in kwargs:
 			period = kwargs["period"]
 			if not isinstance(period, int) or period <= 0:

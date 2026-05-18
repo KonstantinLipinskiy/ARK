@@ -1,4 +1,3 @@
-# app/workers/worker_indicators.py
 import asyncio
 import json
 import time
