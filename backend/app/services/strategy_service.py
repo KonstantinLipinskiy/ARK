@@ -34,23 +34,53 @@ async def load_strategies(db: AsyncSession, use_cache: bool = True):
 			"name": s.name or f"strategy_{s.id}",
 			"enabled_indicators": s.enabled_indicators or [],
 			"entry_conditions": s.entry_conditions or [],
+
+			# --- EMA / RSI / ATR ---
 			"ema_short": s.ema_short or 12,
 			"ema_long": s.ema_long or 26,
 			"rsi_period": s.rsi_period or 14,
 			"atr_period": s.atr_period or 14,
+
+			# --- MACD ---
 			"macd_fast": s.macd_fast or 12,
 			"macd_slow": s.macd_slow or 26,
 			"macd_signal": s.macd_signal or 9,
+
+			# --- Stochastic ---
 			"stochastic_period": s.stochastic_period or 14,
+
+			# --- Bollinger Bands ---
 			"bollinger_period": s.bollinger_period or 20,
+
+			# --- OBV ---
+			"obv_enabled": s.obv_enabled or False,
+
+			# --- Volume SMA ---
+			"volume_period": s.volume_period or 20,
+
+			# --- VWAP ---
+			"vwap_enabled": s.vwap_enabled or False,
+
+			# --- Ichimoku Cloud ---
+			"ichimoku_tenkan": s.ichimoku_tenkan or 9,
+			"ichimoku_kijun": s.ichimoku_kijun or 26,
+			"ichimoku_senkou": s.ichimoku_senkou or 52,
+
+			# --- Риск-менеджмент ---
 			"stop_loss": s.stop_loss or 0.02,
 			"take_profit_targets": s.take_profit_targets or [0.01, 0.02],
 			"take_profit_distribution": s.take_profit_distribution or [],
-			"trailing_stop": s.trailing_stop or 0.0,
+
+			"trailing_stop": bool(s.trailing_stop),
 			"trailing_mode": s.trailing_mode or "none",
+
+			# --- Управление капиталом ---
 			"allocation_percent": s.allocation_percent or 1.0,
 			"leverage": s.leverage or 1,
-			"enabled": s.enabled if hasattr(s, "enabled") else True,
+
+			# --- Дополнительно ---
+			"enabled": s.enabled,
+			"strength_multiplier": s.strength_multiplier or 1.0,
 		}
 
 		config[s.symbol].append(strategy_entry)

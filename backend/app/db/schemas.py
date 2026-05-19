@@ -152,34 +152,65 @@ class BacktestReport(Base):
 	user = relationship("UserORM", back_populates="backtest_reports")
 
 
+from sqlalchemy import Column, Integer, String, Float, Boolean, JSON
+from app.db.base import Base
+
 class StrategyORM(Base):
 	__tablename__ = "strategies"
 
 	id = Column(Integer, primary_key=True, index=True)
 	symbol = Column(String, nullable=False)
-	enabled_indicators = Column(JSON, nullable=False)
-	entry_conditions = Column(JSON, nullable=True)
 
+	# --- Индикаторы и условия ---
+	enabled_indicators = Column(JSON, nullable=False)   # список включённых индикаторов
+	entry_conditions = Column(JSON, nullable=True)      # условия входа (комбинации индикаторов)
+
+	# --- EMA / RSI / ATR ---
 	ema_short = Column(Integer, nullable=True)
 	ema_long = Column(Integer, nullable=True)
 	rsi_period = Column(Integer, nullable=True)
 	atr_period = Column(Integer, nullable=True)
+
+	# --- MACD ---
 	macd_fast = Column(Integer, nullable=True)
 	macd_slow = Column(Integer, nullable=True)
 	macd_signal = Column(Integer, nullable=True)
+
+	# --- Stochastic ---
 	stochastic_period = Column(Integer, nullable=True)
+
+	# --- Bollinger Bands ---
 	bollinger_period = Column(Integer, nullable=True)
 
+	# --- OBV ---
+	obv_enabled = Column(Boolean, default=False)
+
+	# --- Volume SMA ---
+	volume_period = Column(Integer, nullable=True)
+
+	# --- VWAP ---
+	vwap_enabled = Column(Boolean, default=False)
+
+	# --- Ichimoku Cloud ---
+	ichimoku_tenkan = Column(Integer, nullable=True, default=9)
+	ichimoku_kijun = Column(Integer, nullable=True, default=26)
+	ichimoku_senkou = Column(Integer, nullable=True, default=52)
+
+	# --- Риск-менеджмент ---
 	stop_loss = Column(Float, nullable=False)
 	take_profit_targets = Column(JSON, nullable=False)
 	take_profit_distribution = Column(JSON, nullable=True)
+
 	trailing_stop = Column(Boolean, default=False)
 	trailing_mode = Column(String, default="step")
 
+	# --- Управление капиталом ---
 	allocation_percent = Column(Float, nullable=False)
 	leverage = Column(Integer, default=1)
 
+	# --- Дополнительно ---
 	strength_multiplier = Column(Float, nullable=False, default=1.0)
+	enabled = Column(Boolean, default=True)  # 🔹 добавлено для симметрии
 
 
 class RiskSettingsORM(Base):

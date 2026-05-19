@@ -10,9 +10,9 @@ from app.services.risk_service import load_risk_settings
 
 # 🔹 Профили риска
 RISK_PROFILES = {
-    "conservative": {"max_risk_per_trade": 0.005, "max_daily_loss": 0.03, "max_leverage": 1},
-    "moderate": {"max_risk_per_trade": 0.01, "max_daily_loss": 0.05, "max_leverage": 3},
-    "aggressive": {"max_risk_per_trade": 0.02, "max_daily_loss": 0.1, "max_leverage": 5},
+	"conservative": {"max_risk_per_trade": 0.005, "max_daily_loss": 0.03, "max_leverage": 1},
+	"moderate": {"max_risk_per_trade": 0.01, "max_daily_loss": 0.05, "max_leverage": 3},
+	"aggressive": {"max_risk_per_trade": 0.02, "max_daily_loss": 0.1, "max_leverage": 5},
 }
 
 class RiskService:
@@ -182,6 +182,22 @@ class RiskService:
 		if not self.last_trade_time:
 			return True
 		return datetime.utcnow() - self.last_trade_time >= timedelta(seconds=cooldown)
+
+	async def _log_violation(self, reason: str, symbol: str, position_size: float, deposit: float):
+		"""Запись нарушения риск-менеджмента в БД и лог."""
+		try:
+			violation = RiskLog(
+				reason=reason,
+				symbol=symbol,
+				position_size=position_size,
+				deposit=deposit,
+				timestamp=datetime.utcnow()
+			)
+			self.db_session.add(violation)
+			await self.db_session.commit()
+			logger.warning(f"⚠️ Risk violation: {reason} | {symbol} | pos={position_size:.4f} | dep={deposit}")
+		except Exception as e:
+			logger.error(f"❌ Failed to log violation: {e}")
 
 	async def validate_trade(
 		self,
