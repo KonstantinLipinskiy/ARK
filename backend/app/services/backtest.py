@@ -4,13 +4,14 @@ import matplotlib.pyplot as plt
 import asyncio
 from datetime import datetime
 from numba import njit
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services import indicators, risk
 from app.services.ml import MLService
 from app.config import settings
 from app.utils.logger import logger
 from app.db.session import get_session
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.strategy_service import load_strategies
+from app.services.exchange import load_strategies
 from app.broker.rabbitmq import RabbitMQBroker
 from app.db import crud
 from app.models.trade import Trade

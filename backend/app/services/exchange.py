@@ -1,11 +1,16 @@
 import ccxt.async_support as ccxt
+from sqlalchemy import select
+import asyncio
+import time
+from sqlalchemy.ext.asyncio import AsyncSession
+import pandas as pd
+
 from app.config import settings
 from app.utils.logger import logger
 from app.services.risk import RiskService
 from app.services.telegram import TelegramService
-from app.db.schemas import TradeORM
-from sqlalchemy import select
-import asyncio
+from app.db.schemas import TradeORM, StrategyORM, OHLCVHourly
+
 
 # --- INIT ---
 def get_exchange():
@@ -71,7 +76,7 @@ async def create_order(
 	reduce_only: bool = False,    # поддержка reduceOnly
 	take_profit: float | None = None,
 	stop_price: float | None = None
-):
+	):
 	try:
 		exchange = get_exchange()
 		trading_mode = settings.TRADING_MODE
@@ -254,3 +259,169 @@ async def set_margin_mode(symbol: str, mode: str = "isolated"):
 		msg = format_ccxt_error(e)
 		logger.error(f"❌ Margin mode error: {msg}")
 		return {"error": msg}
+
+
+# глобальные переменные для кэша
+STRATEGY_CONFIG = {}
+CACHE_TIMESTAMP = 0
+CACHE_TTL = 300  # 5 минут
+
+async def load_strategies(db: AsyncSession, use_cache: bool = True) -> dict:
+	"""
+	Загрузить все стратегии из БД и собрать словарь STRATEGY_CONFIG.
+	Поддержка нескольких стратегий на один символ и комбинированных индикаторов.
+	"""
+	global STRATEGY_CONFIG, CACHE_TIMESTAMP
+
+	# --- проверка кэша ---
+	if use_cache and STRATEGY_CONFIG and (time.time() - CACHE_TIMESTAMP < CACHE_TTL):
+		return STRATEGY_CONFIG
+
+	try:
+		result = await db.execute(select(StrategyORM))
+		strategies = result.scalars().all()
+		config = {}
+
+		for s in strategies:
+			# 🔹 поддержка нескольких стратегий на один символ
+			if s.symbol not in config:
+					config[s.symbol] = []
+
+			strategy_entry = {
+					"name": s.symbol + "_" + str(s.id),
+					"enabled_indicators": s.enabled_indicators or [],
+					"entry_conditions": s.entry_conditions or [],
+					"ema_short": s.ema_short or 12,
+					"ema_long": s.ema_long or 26,
+					"rsi_period": s.rsi_period or 14,
+					"atr_period": s.atr_period or 14,
+					"macd_fast": s.macd_fast or 12,
+					"macd_slow": s.macd_slow or 26,
+					"macd_signal": s.macd_signal or 9,
+					"stochastic_period": s.stochastic_period or 14,
+					"bollinger_period": s.bollinger_period or 20,
+					"obv_enabled": s.obv_enabled or False,
+					"volume_period": s.volume_period or None,
+					"vwap_enabled": s.vwap_enabled or False,
+					"ichimoku_tenkan": s.ichimoku_tenkan or 9,
+					"ichimoku_kijun": s.ichimoku_kijun or 26,
+					"ichimoku_senkou": s.ichimoku_senkou or 52,
+					"stop_loss": s.stop_loss or 0.02,
+					"take_profit_targets": s.take_profit_targets or [0.01, 0.02],
+					"take_profit_distribution": s.take_profit_distribution or [],
+					"trailing_stop": s.trailing_stop or False,
+					"trailing_mode": s.trailing_mode or "none",
+					"allocation_percent": s.allocation_percent or 0.05,
+					"leverage": s.leverage or 1,
+					"strength_multiplier": s.strength_multiplier or 1.0,
+					"enabled": s.enabled if hasattr(s, "enabled") else True,
+			}
+
+			config[s.symbol].append(strategy_entry)
+
+		STRATEGY_CONFIG = config
+		CACHE_TIMESTAMP = time.time()
+		logger.info("♻️ Стратегии обновлены из БД")
+		return STRATEGY_CONFIG
+
+	except Exception as e:
+		logger.error(f"❌ Failed to load strategies: {e}")
+		return STRATEGY_CONFIG
+
+async def get_ohlcv(
+	db_session: AsyncSession,
+	symbol: str,
+	timeframe: str = "1h",
+	limit: int = 100,
+	as_dataframe: bool = True
+	):
+	"""
+	Получение свечей (OHLCV) с биржи.
+	timeframe: "1m", "5m", "15m", "1h", "4h", "1d" и т.д.
+	- Часовые свечи сохраняем в БД
+	- Дневные используем как фильтр (без сохранения)
+	- Возврат: DataFrame (по умолчанию) или список словарей
+	"""
+	try:
+		exchange = get_exchange()
+		candles = await exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+
+		# Преобразуем в DataFrame
+		df = pd.DataFrame(
+			candles,
+			columns=["timestamp", "open", "high", "low", "close", "volume"]
+		)
+
+		if timeframe == "1h":
+			# Сохраняем часовые свечи в таблицу ohlcv_hourly (bulk insert)
+			objects = [
+					OHLCVHourly(
+						symbol=symbol,
+						timestamp=row[0],
+						open=row[1],
+						high=row[2],
+						low=row[3],
+						close=row[4],
+						volume=row[5],
+					)
+					for row in candles
+			]
+			db_session.bulk_save_objects(objects)
+			await db_session.commit()
+			logger.info(f"✅ Saved {len(candles)} hourly candles for {symbol}")
+
+		else:
+			# Для дневных свечей просто возвращаем
+			logger.info(f"📊 Loaded {len(candles)} {timeframe} candles for {symbol}")
+
+		# Возврат в нужном формате
+		if as_dataframe:
+			return df
+		else:
+			return df.to_dict(orient="records")
+
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ OHLCV error for {symbol} {timeframe}: {msg}")
+		return {"error": msg}
+
+
+async def update_ohlcv_for_all_pairs(
+	db_session: AsyncSession,
+	timeframe: str = "1h",
+	limit: int = 500,
+	as_dataframe: bool = True
+):
+	"""
+	Массовое обновление OHLCV свечей для всех валютных пар из таблицы strategies.
+	- H1 свечи сохраняем в БД
+	- D1 свечи используем как фильтр (без сохранения)
+	- Возврат: словарь {symbol: DataFrame | list[dict]}
+	"""
+	try:
+		# Загружаем список стратегий из БД
+		strategies = await load_strategies(db_session)
+
+		results = {}
+
+		for symbol in strategies.keys():
+			candles = await get_ohlcv(
+					db_session,
+					symbol=symbol,
+					timeframe=timeframe,
+					limit=limit,
+					as_dataframe=as_dataframe
+			)
+
+			if isinstance(candles, dict) and "error" in candles:
+					logger.error(f"❌ Failed to update OHLCV for {symbol}: {candles['error']}")
+					results[symbol] = candles
+			else:
+					logger.info(f"✅ OHLCV updated for {symbol} ({timeframe})")
+					results[symbol] = candles
+
+		return results
+
+	except Exception as e:
+		logger.error(f"❌ update_ohlcv_for_all_pairs error: {e}")
+		return {"error": str(e)}

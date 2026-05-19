@@ -9,16 +9,18 @@ import torch.nn as nn
 import torch.optim as optim
 from tensorflow import keras
 from transformers import pipeline
+import numpy as np   # 🔹 для проверки дисперсии и нормализации
+
 from app.db.vector import VectorDB
 from app.utils.logger import logger
 from app.config import settings   # 🔹 используем централизованный конфиг
-import numpy as np   # 🔹 добавлено для проверки дисперсии
+
 
 class MLService:
 	def __init__(self):
 		self.model = None
 		self.vector_db = VectorDB()
-		self.vector_size = settings.QDRANT_VECTOR_SIZE   # 🔹 гибкость размера векторов
+		self.vector_size = settings.QDRANT_VECTOR_SIZE   # 🔹 гибкий размер векторов
 		self._seen_ids = set()
 		# 🔹 инициализируем sentiment pipeline один раз
 		try:
@@ -27,7 +29,12 @@ class MLService:
 			logger.error(f"Ошибка инициализации sentiment pipeline: {e}")
 			self.sentiment_pipeline = None
 
+	# --- ПОДГОТОВКА ДАННЫХ ---
 	def prepare_data(self, trades: list[dict]) -> pd.DataFrame:
+		"""
+		Принимает список сделок/свечей и готовит признаки для ML-модели.
+		Добавляет индикаторы: ATR, Bollinger, OBV, Stochastic, VWAP, Ichimoku, Volume MA, News Sentiment.
+		"""
 		df = pd.DataFrame(trades)
 
 		# 🔹 фильтрация коротких новостей
@@ -63,8 +70,8 @@ class MLService:
 
 		if "volume" in df.columns:
 			df["volume_ma"] = df["volume"].rolling(window=20).mean()
-			df["volume"] = df["volume"]
 
+		# 🔹 новостной сентимент
 		try:
 			self.vector_db.use_collection("news")
 			sentiments = []
@@ -77,12 +84,17 @@ class MLService:
 						sentiments.append(0.0)
 			df["news_sentiment"] = sentiments
 		except Exception as e:
-			logger.error(f"Ошибка добавления новостного сентимента: {e}", extra={"operation": "prepare_data", "collection": "news"})
+			logger.error(f"Ошибка добавления новостного сентимента: {e}",
+								extra={"operation": "prepare_data", "collection": "news"})
 			df["news_sentiment"] = 0.0
 
 		return df
 
+	# --- ОБУЧЕНИЕ ---
 	def train(self, df: pd.DataFrame, model_type: str = "sklearn") -> dict:
+		"""
+		Обучение модели (sklearn, pytorch, tensorflow).
+		"""
 		if model_type == "sklearn":
 			X = df[["ema", "rsi", "macd", "hour", "atr",
 						"bollinger_upper", "bollinger_lower", "bollinger",
@@ -137,6 +149,7 @@ class MLService:
 		else:
 			raise ValueError("Неизвестный тип модели")
 
+	# --- ПРЕДСКАЗАНИЯ ---
 	def predict_signal(self, features: dict) -> float:
 		if not self.model:
 			raise ValueError("Model not trained")
@@ -153,13 +166,15 @@ class MLService:
 		try:
 			self.save_signal_embedding(features, signal_id=hash(str(features)))
 		except Exception as e:
-			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}", extra={"operation": "insert", "collection": "signals"})
+			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}",
+								extra={"operation": "insert", "collection": "signals"})
 		return result
 
 	def get_confidence_score(self, features: dict) -> float:
 		result = self.predict_with_confidence(features)
 		return result["confidence_score"]
 
+	# --- АНАЛИЗ НОВОСТЕЙ ---
 	def analyze_news(self, text: str) -> dict:
 		if not self.sentiment_pipeline:
 			return {"label": "UNKNOWN", "score": 0.0}
@@ -182,10 +197,16 @@ class MLService:
 
 			self.vector_db.insert_vector(vector, payload)
 		except Exception as e:
-			logger.error(f"Ошибка сохранения эмбеддинга новости: {e}", extra={"operation": "insert", "collection": "news"})
+			logger.error(f"Ошибка сохранения эмбеддинга новости: {e}",
+								extra={"operation": "insert", "collection": "news"})
 		return result
 
+	# --- СОХРАНЕНИЕ/ЗАГРУЗКА МОДЕЛИ ---
 	def save_model(self, path: str):
+		"""
+		Сохраняет обученную модель на диск.
+		Поддержка: sklearn, pytorch, tensorflow.
+		"""
 		if self.model is None:
 			raise ValueError("Нет обученной модели для сохранения")
 		if isinstance(self.model, RandomForestClassifier):
@@ -198,6 +219,9 @@ class MLService:
 			raise TypeError("Неизвестный тип модели")
 
 	def load_model(self, path: str, model_type: str):
+		"""
+		Загружает модель с диска.
+		"""
 		if model_type == "sklearn":
 			self.model = joblib.load(path)
 		elif model_type == "pytorch":
@@ -214,6 +238,7 @@ class MLService:
 		else:
 			raise ValueError("Неизвестный тип модели")
 
+	# --- СОХРАНЕНИЕ ЭМБЕДДИНГА СИГНАЛА ---
 	def save_signal_embedding(self, features: dict, signal_id: int):
 		"""
 		Сохраняет эмбеддинг сигнала в Qdrant.
@@ -253,8 +278,10 @@ class MLService:
 					return {"status": "skipped", "reason": "invalid payload"}
 
 			self.vector_db.insert_vector(vector, payload)
-			logger.info(f"Эмбеддинг сигнала сохранён: {payload}", extra={"operation": "insert", "collection": "signals"})
+			logger.info(f"Эмбеддинг сигнала сохранён: {payload}",
+							extra={"operation": "insert", "collection": "signals"})
 			return {"status": "ok", "id": signal_id}
 		except Exception as e:
-			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}", extra={"operation": "insert", "collection": "signals"})
+			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}",
+								extra={"operation": "insert", "collection": "signals"})
 			return {"error": str(e)}

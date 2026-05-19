@@ -11,7 +11,7 @@ from app.services.rabbitmq import RabbitMQBroker
 from app.utils.metrics import calculate_metrics
 from app.config import Settings
 from app.db.session import get_session
-from app.services.strategy_service import load_strategies
+from app.services.exchange import load_strategies
 from app.services.risk import RiskService
 
 settings = Settings()

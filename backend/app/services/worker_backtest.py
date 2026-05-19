@@ -3,7 +3,7 @@ import asyncio
 import json
 import pandas as pd
 from app.services.backtest import backtest_strategy, calculate_metrics, save_trades_to_db, save_metrics_to_db, plot_backtest
-from app.services.strategy_service import load_strategies
+from app.services.exchange import load_strategies
 from app.db.session import get_session
 from app.broker.rabbitmq import RabbitMQBroker
 from app.utils.logger import logger

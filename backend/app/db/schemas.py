@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, BigInteger, JSON
 from sqlalchemy.orm import relationship
 import enum
 from app.db.base import Base
+
 
 class TradeStatus(enum.Enum):
 	open = "open"
@@ -44,7 +45,6 @@ class TradeORM(Base):
 	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
 	signal = relationship("SignalORM", back_populates="trades")
 
-
 class BacktestTradeORM(Base):
 	__tablename__ = "backtest_trades"
 
@@ -67,7 +67,6 @@ class BacktestTradeORM(Base):
 
 	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
 	signal = relationship("SignalORM", back_populates="backtest_trades")
-
 
 class SignalORM(Base):
 	__tablename__ = "signals"
@@ -94,7 +93,6 @@ class SignalORM(Base):
 	trades = relationship("TradeORM", back_populates="signal", cascade="all, delete-orphan")
 
 	backtest_trades = relationship("BacktestTradeORM", back_populates="signal", cascade="all, delete-orphan")
-
 
 class UserORM(Base):
 	__tablename__ = "users"
@@ -124,7 +122,6 @@ class UserORM(Base):
 
 	refresh_tokens = relationship("RefreshTokenORM", back_populates="user", cascade="all, delete-orphan")
 
-
 class RiskLog(Base):
 	__tablename__ = "risk_logs"
 
@@ -134,7 +131,6 @@ class RiskLog(Base):
 	position_size = Column(Float, nullable=True)
 	deposit = Column(Float, nullable=True)
 	timestamp = Column(DateTime, server_default=func.now())
-
 
 class BacktestReport(Base):
 	__tablename__ = "backtest_reports"
@@ -150,10 +146,6 @@ class BacktestReport(Base):
 
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="backtest_reports")
-
-
-from sqlalchemy import Column, Integer, String, Float, Boolean, JSON
-from app.db.base import Base
 
 class StrategyORM(Base):
 	__tablename__ = "strategies"
@@ -212,7 +204,6 @@ class StrategyORM(Base):
 	strength_multiplier = Column(Float, nullable=False, default=1.0)
 	enabled = Column(Boolean, default=True)  # 🔹 добавлено для симметрии
 
-
 class RiskSettingsORM(Base):
 	__tablename__ = "risk_settings"
 
@@ -228,7 +219,6 @@ class RiskSettingsORM(Base):
 
 	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-
 class IndicatorORM(Base):
 	__tablename__ = "indicators"
 
@@ -237,7 +227,6 @@ class IndicatorORM(Base):
 	name = Column(String(50), nullable=False, index=True)
 	value = Column(String(255), nullable=False)
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
-
 
 class RefreshTokenORM(Base):
 	__tablename__ = "refresh_tokens"
@@ -249,3 +238,15 @@ class RefreshTokenORM(Base):
 
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="refresh_tokens")
+
+class OHLCVHourly(Base):
+	__tablename__ = "ohlcv_hourly"
+
+	id = Column(Integer, primary_key=True, index=True)
+	symbol = Column(String, nullable=False)          # валютная пара (BTC/USDT, ETH/USDT и т.д.)
+	timestamp = Column(BigInteger, nullable=False)   # время свечи (Unix ms)
+	open = Column(Float, nullable=False)
+	high = Column(Float, nullable=False)
+	low = Column(Float, nullable=False)
+	close = Column(Float, nullable=False)
+	volume = Column(Float, nullable=False)

@@ -5,10 +5,9 @@ from sqlalchemy import select, func
 from app.db.schemas import RiskLog, TradeORM, UserORM
 from app.utils.logger import logger
 from app.services.rabbitmq import RabbitMQBroker
-from app.services.strategy_service import load_strategies
+from app.services.exchange import load_strategies   # ✅ теперь импорт из exchange.py
 from app.services.risk_service import load_risk_settings
 
-# 🔹 Профили риска
 RISK_PROFILES = {
 	"conservative": {"max_risk_per_trade": 0.005, "max_daily_loss": 0.03, "max_leverage": 1},
 	"moderate": {"max_risk_per_trade": 0.01, "max_daily_loss": 0.05, "max_leverage": 3},
@@ -16,29 +15,23 @@ RISK_PROFILES = {
 }
 
 class RiskService:
-	"""
-	Сервис риск‑менеджмента:
-	- Расчёт размера позиции (статично / динамически)
-	- Проверка стоп‑лоссов, лимитов и трейлинг‑стопов
-	- Унификация проверок через validate_trade()
-	- Интеграция с БД и RabbitMQ (уведомления в Telegram через воркер)
-	"""
-
 	def __init__(self, db_session: AsyncSession):
 		self.db_session = db_session
 		self.broker = RabbitMQBroker()
 		self.last_trade_time = None
 		asyncio.create_task(self.broker.connect())
 
-		# 🔹 Конфиги загружаются асинхронно через refresh_config()
 		self.STRATEGY_CONFIG = {}
 		self.RISK_CONFIG = {}
-		self._user_risk_cache = {}  # 🔹 кэш для user_id → risk_config
+		self._user_risk_cache = {}
+
+		# ✅ сразу подтягиваем конфиги при создании сервиса
+		asyncio.create_task(self.refresh_config())
 
 	async def refresh_config(self):
 		"""Обновить стратегии и риск‑параметры из БД"""
 		try:
-			self.STRATEGY_CONFIG = await load_strategies(self.db_session)
+			self.STRATEGY_CONFIG = await load_strategies(self.db_session)   # ✅ из exchange.py
 			self.RISK_CONFIG = await load_risk_settings(self.db_session)
 			self._user_risk_cache.clear()
 			logger.info("♻️ RiskService configs refreshed")
@@ -105,29 +98,35 @@ class RiskService:
 	) -> float:
 		"""Расчёт размера позиции с учётом риска, allocation, силы сигнала и ML confidence."""
 		risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
-		risk_amount = deposit * risk_config["max_risk_per_trade"]
+		risk_amount = deposit * risk_config.get("max_risk_per_trade", 0.01)
 
 		# --- масштабирование риска ---
 		if risk_config.get("dynamic_allocation", False):
 			multiplier = min(strength, 2.0)
 			if ml_confidence:
-				multiplier *= (1 + ml_confidence)
+					multiplier *= (1 + ml_confidence)
 			risk_amount *= multiplier
 
 		# --- базовые параметры стратегии ---
+		if symbol not in self.STRATEGY_CONFIG:
+			await self.refresh_config()
+			if symbol not in self.STRATEGY_CONFIG:
+					logger.error(f"❌ Strategy config not found for {symbol}")
+					return 0.0
+
 		base_allocation = self.STRATEGY_CONFIG[symbol].get("allocation_percent", 0.05)
 		strength_multiplier = self.STRATEGY_CONFIG[symbol].get("strength_multiplier", 1.0)
 
 		# --- динамическая аллокация ---
 		if risk_config.get("dynamic_allocation", False):
 			performance_factor = await self._get_pair_performance(symbol)
-			confidence_factor = 1.0 + (ml_confidence or 0)  # учёт доверия ML
+			confidence_factor = 1.0 + (ml_confidence or 0)
 			dynamic_allocation = (
-				base_allocation
-				* performance_factor
-				* strength
-				* strength_multiplier
-				* confidence_factor
+					base_allocation
+					* performance_factor
+					* strength
+					* strength_multiplier
+					* confidence_factor
 			)
 			allocation_percent = min(dynamic_allocation, base_allocation * 2)
 		else:
@@ -136,18 +135,17 @@ class RiskService:
 		# --- итоговый размер позиции ---
 		allocated_deposit = deposit * allocation_percent
 		stop_loss_amount = entry_price * stop_loss_pct
-		position_size_by_risk = risk_amount / stop_loss_amount
-		position_size_by_allocation = allocated_deposit / entry_price
+		position_size_by_risk = risk_amount / stop_loss_amount if stop_loss_amount > 0 else 0
+		position_size_by_allocation = allocated_deposit / entry_price if entry_price > 0 else 0
 
 		position_size = min(position_size_by_risk, position_size_by_allocation)
-		max_position = (deposit * risk_config.get("max_leverage", 1)) / entry_price
+		max_position = (deposit * risk_config.get("max_leverage", 1)) / entry_price if entry_price > 0 else 0
 		return min(position_size, max_position)
-
 
 	def calculate_leverage(self, symbol: str, strength: float, user_risk_config: dict | None = None) -> int:
 		"""Динамическое управление плечом."""
 		risk_config = user_risk_config or self.RISK_CONFIG
-		base_leverage = self.STRATEGY_CONFIG[symbol].get("leverage", 1)
+		base_leverage = self.STRATEGY_CONFIG.get(symbol, {}).get("leverage", 1)
 		max_leverage = risk_config.get("max_leverage", base_leverage)
 
 		if strength < 0.8:
@@ -172,10 +170,10 @@ class RiskService:
 			return min(stop_price, new_stop)
 
 	def check_daily_loss(self, total_loss_pct: float, risk_config: dict) -> bool:
-		return total_loss_pct <= risk_config["max_daily_loss"]
+		return total_loss_pct <= risk_config.get("max_daily_loss", 0.05)
 
 	def check_open_trades(self, open_trades: int, risk_config: dict) -> bool:
-		return open_trades < risk_config["max_open_trades"]
+		return open_trades < risk_config.get("max_open_trades", 5)
 
 	def check_cooldown(self, risk_config: dict) -> bool:
 		cooldown = risk_config.get("cooldown_between_trades", 0)
@@ -187,11 +185,11 @@ class RiskService:
 		"""Запись нарушения риск-менеджмента в БД и лог."""
 		try:
 			violation = RiskLog(
-				reason=reason,
-				symbol=symbol,
-				position_size=position_size,
-				deposit=deposit,
-				timestamp=datetime.utcnow()
+					reason=reason,
+					symbol=symbol,
+					position_size=position_size,
+					deposit=deposit,
+					timestamp=datetime.utcnow()
 			)
 			self.db_session.add(violation)
 			await self.db_session.commit()
@@ -212,6 +210,14 @@ class RiskService:
 	) -> bool:
 		"""Унифицированная проверка всех условий риска."""
 		try:
+			# ✅ проверка, что конфиги загружены
+			if not self.STRATEGY_CONFIG or not self.RISK_CONFIG:
+					await self.refresh_config()
+
+			if symbol not in self.STRATEGY_CONFIG:
+					logger.error(f"❌ Strategy config not found for {symbol}")
+					return False
+
 			risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
 			position_size = await self.calculate_position_size(
 					symbol, deposit, entry_price, stop_loss_pct, strength, user_id
@@ -306,4 +312,3 @@ class RiskService:
 					"error": f"Risk validation error: {e}"
 			})
 			return False
-

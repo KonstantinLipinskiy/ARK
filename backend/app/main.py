@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -13,9 +13,8 @@ from app.monitoring import prometheus
 from app.utils.logger import logger
 from prometheus_client import Counter, Histogram
 from sqlalchemy import event
-from app.db.session import engine_mainnet, engine_testnet
-from fastapi import HTTPException
-
+from app.db.session import engine_mainnet, engine_testnet, async_session
+from app.services.risk import RiskService   # ✅ импорт RiskService
 
 REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests")
 REQUEST_LATENCY = Histogram("http_request_duration_seconds", "Request latency in seconds")
@@ -45,7 +44,6 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 	except jwt.InvalidTokenError:
 		raise HTTPException(status_code=401, detail="Invalid token")
 
-
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
 	logger.info(f"Запрос: {request.method} {request.url}")
@@ -59,7 +57,6 @@ async def log_requests(request: Request, call_next):
 	logger.info(f"Ответ: {response.status_code} за {duration:.4f} сек")
 	return response
 
-
 @event.listens_for(engine_mainnet.sync_engine, "before_cursor_execute")
 def before_cursor_execute_mainnet(conn, cursor, statement, parameters, context, executemany):
 	logger.info(f"[MAINNET SQL] {statement} | params: {parameters}")
@@ -68,14 +65,12 @@ def before_cursor_execute_mainnet(conn, cursor, statement, parameters, context, 
 def before_cursor_execute_testnet(conn, cursor, statement, parameters, context, executemany):
 	logger.info(f"[TESTNET SQL] {statement} | params: {parameters}")
 
-
 app.include_router(routes_signals.router, prefix="/api/v1/signals", tags=["Signals"])
 app.include_router(routes_trades.router, prefix="/api/v1/trades", tags=["Trades"])
 app.include_router(routes_users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(routes_admin.router, prefix="/api/v1/admin", tags=["Admin"])
 app.include_router(routes_indicators.router, prefix="/api/v1/indicators", tags=["Indicators"])
 app.include_router(prometheus.router)
-
 
 @app.get("/")
 async def root():
@@ -98,15 +93,31 @@ async def health_check():
 		"market_type": config.settings.TRADING_MODE
 	}
 
+
+
+@app.get("/risk-check")
+async def risk_check(request: Request):
+	risk_service: RiskService = request.app.state.risk_service
+	return {
+		"config_loaded": bool(risk_service.STRATEGY_CONFIG),
+		"risk_config_keys": list(risk_service.RISK_CONFIG.keys())
+	}
+
+
 @app.on_event("startup")
 async def startup_event():
 	logger.info("Запуск ARK Bot API...")
 	await init_rabbitmq()
 	await init_redis()
+
+	# ✅ создаём RiskService и явно подтягиваем конфиги
+	async with async_session() as db_session:
+		app.state.risk_service = RiskService(db_session)
+		await app.state.risk_service.refresh_config()
+
 	await telegram_service.send_message("ARK Bot запущен ✅")
 
 @app.on_event("shutdown")
 async def shutdown_event():
 	logger.info("Остановка ARK Bot API...")
 	await telegram_service.send_message("ARK Bot остановлен ❌")
-
