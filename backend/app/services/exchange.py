@@ -425,3 +425,141 @@ async def update_ohlcv_for_all_pairs(
 	except Exception as e:
 		logger.error(f"❌ update_ohlcv_for_all_pairs error: {e}")
 		return {"error": str(e)}
+
+# --- GET TICKER ---
+async def get_ticker(symbol: str):
+	"""
+	Получить текущую цену инструмента, bid/ask и спред.
+	"""
+	try:
+		exchange = get_exchange()
+		ticker = await exchange.fetch_ticker(symbol)
+
+		result = {
+			"symbol": symbol,
+			"last": ticker.get("last"),
+			"bid": ticker.get("bid"),
+			"ask": ticker.get("ask"),
+			"spread": (ticker.get("ask") - ticker.get("bid")) if ticker.get("ask") and ticker.get("bid") else None,
+			"timestamp": ticker.get("timestamp")
+		}
+
+		return result
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Ticker error for {symbol}: {msg}")
+		return {"error": msg}
+
+
+# --- GET ORDER BOOK ---
+async def get_order_book(symbol: str, limit: int = 20):
+	"""
+	Получить стакан заявок (глубину рынка).
+	limit: количество уровней стакана (по умолчанию 20).
+	"""
+	try:
+		exchange = get_exchange()
+		order_book = await exchange.fetch_order_book(symbol, limit=limit)
+
+		result = {
+			"symbol": symbol,
+			"bids": order_book.get("bids", []),  # список [price, amount]
+			"asks": order_book.get("asks", []),  # список [price, amount]
+			"timestamp": order_book.get("timestamp")
+		}
+
+		return result
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Order book error for {symbol}: {msg}")
+		return {"error": msg}
+
+# --- GET FUNDING RATE ---
+async def get_funding_rate(symbol: str):
+	"""
+	Получить ставку финансирования для фьючерсов.
+	"""
+	try:
+		exchange = get_exchange()
+		funding = await exchange.fetch_funding_rate(symbol)
+
+		result = {
+			"symbol": symbol,
+			"fundingRate": funding.get("fundingRate"),
+			"timestamp": funding.get("timestamp"),
+			"nextFundingTime": funding.get("nextFundingTime")
+		}
+
+		return result
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Funding rate error for {symbol}: {msg}")
+		return {"error": msg}
+
+
+# --- GET MARK PRICE ---
+async def get_mark_price(symbol: str):
+	"""
+	Получить mark price для фьючерсов.
+	"""
+	try:
+		exchange = get_exchange()
+		mark = await exchange.fetch_mark_price(symbol)
+
+		result = {
+			"symbol": symbol,
+			"markPrice": mark.get("markPrice"),
+			"timestamp": mark.get("timestamp")
+		}
+
+		return result
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Mark price error for {symbol}: {msg}")
+		return {"error": msg}
+
+# --- GET SYMBOLS ---
+async def get_symbols():
+	"""
+	Получить список всех доступных торговых пар на бирже.
+	"""
+	try:
+		exchange = get_exchange()
+		markets = await exchange.load_markets()
+
+		# Список символов (например, "BTC/USDT", "ETH/USDT")
+		symbols = list(markets.keys())
+
+		result = {
+			"symbols": symbols,
+			"count": len(symbols)
+		}
+
+		return result
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Symbols error: {msg}")
+		return {"error": msg}
+
+
+# --- GET EXCHANGE INFO ---
+async def get_exchange_info():
+	"""
+	Получить общую информацию о бирже (лимиты, режимы, метаданные).
+	"""
+	try:
+		exchange = get_exchange()
+		info = await exchange.fetch_exchange_info() if hasattr(exchange, "fetch_exchange_info") else await exchange.load_markets()
+
+		result = {
+			"exchange": settings.EXCHANGE_CONFIG["name"],
+			"trading_mode": settings.TRADING_MODE,
+			"symbols_count": len(info.get("symbols", info.keys())),
+			"info": info
+		}
+
+		return result
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ Exchange info error: {msg}")
+		return {"error": msg}

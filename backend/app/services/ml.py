@@ -14,6 +14,7 @@ import numpy as np   # 🔹 для проверки дисперсии и нор
 from app.db.vector import VectorDB
 from app.utils.logger import logger
 from app.config import settings   # 🔹 используем централизованный конфиг
+from app.services.exchange import get_ticker, get_order_book, get_mark_price   # 🔹 новые методы
 
 
 class MLService:
@@ -90,6 +91,35 @@ class MLService:
 
 		return df
 
+	# --- ДОБАВЛЕНИЕ РЫНОЧНЫХ ДАННЫХ ---
+	async def enrich_with_market_data(self, symbol: str, trades: list[dict]) -> pd.DataFrame:
+		"""
+		Расширяет свечи актуальными данными: тикер, стакан, mark price.
+		"""
+		df = pd.DataFrame(trades)
+
+		# --- тикер ---
+		ticker = await get_ticker(symbol)
+		if "error" not in ticker:
+			df["last_price"] = ticker["last"]
+			df["bid"] = ticker["bid"]
+			df["ask"] = ticker["ask"]
+			df["spread"] = ticker["spread"]
+
+		# --- стакан ---
+		order_book = await get_order_book(symbol, limit=20)
+		if "error" not in order_book:
+			total_bids = sum([b[1] for b in order_book["bids"]])
+			total_asks = sum([a[1] for a in order_book["asks"]])
+			df["liquidity_imbalance"] = total_bids - total_asks
+
+		# --- mark price ---
+		mark = await get_mark_price(symbol)
+		if "error" not in mark:
+			df["mark_price"] = mark["markPrice"]
+
+		return df
+
 	# --- ОБУЧЕНИЕ ---
 	def train(self, df: pd.DataFrame, model_type: str = "sklearn") -> dict:
 		"""
@@ -99,7 +129,8 @@ class MLService:
 			X = df[["ema", "rsi", "macd", "hour", "atr",
 						"bollinger_upper", "bollinger_lower", "bollinger",
 						"obv", "stochastic", "vwap", "ichimoku",
-						"volume", "volume_ma", "news_sentiment"]].fillna(0)
+						"volume", "volume_ma", "news_sentiment",
+						"last_price", "spread", "liquidity_imbalance", "mark_price"]].fillna(0)
 			y = df["result"]
 			X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 			self.model = RandomForestClassifier()

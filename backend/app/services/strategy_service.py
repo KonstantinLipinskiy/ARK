@@ -4,7 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db.schemas import StrategyORM
 from app.utils.logger import logger
 from app.services.telegram import telegram_service
-from app.services.exchange import load_strategies   # ✅ теперь импортируем из exchange.py
+from app.services.exchange import load_strategies, get_ticker, get_order_book   # 🔹 новые методы
 
 # --- CRUD операции ---
 async def add_strategy(db: AsyncSession, strategy_data: dict):
@@ -100,3 +100,34 @@ def validate_strategy(strategy: dict) -> bool:
 			logger.error(f"❌ Стратегия некорректна: отсутствует {field}")
 			return False
 	return True
+
+# --- Дополнительно: доступ к рынку ---
+async def get_strategy_market_data(symbol: str) -> dict:
+	"""
+	Получить рыночные данные для стратегии:
+	- текущая цена, bid/ask, spread
+	- стакан заявок (дисбаланс ликвидности)
+	"""
+	try:
+		ticker = await get_ticker(symbol)
+		order_book = await get_order_book(symbol, limit=20)
+
+		if "error" in ticker or "error" in order_book:
+			return {"error": "Не удалось получить рыночные данные"}
+
+		total_bids = sum([b[1] for b in order_book["bids"]])
+		total_asks = sum([a[1] for a in order_book["asks"]])
+		liquidity_imbalance = total_bids - total_asks
+
+		return {
+			"symbol": symbol,
+			"last_price": ticker["last"],
+			"bid": ticker["bid"],
+			"ask": ticker["ask"],
+			"spread": ticker["spread"],
+			"liquidity_imbalance": liquidity_imbalance,
+			"timestamp": ticker["timestamp"]
+		}
+	except Exception as e:
+		logger.error(f"❌ Ошибка получения рыночных данных для {symbol}: {e}")
+		return {"error": str(e)}

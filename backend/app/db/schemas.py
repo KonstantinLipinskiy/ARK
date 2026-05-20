@@ -250,3 +250,12 @@ class OHLCVHourly(Base):
 	low = Column(Float, nullable=False)
 	close = Column(Float, nullable=False)
 	volume = Column(Float, nullable=False)
+
+class FundingRateORM(Base):
+	__tablename__ = "funding_rates"
+
+	id = Column(Integer, primary_key=True, index=True)
+	symbol = Column(String(20), nullable=False, index=True)        # валютная пара (BTC/USDT, ETH/USDT и т.д.)
+	timestamp = Column(BigInteger, nullable=False, index=True)     # время получения ставки (Unix ms)
+	rate = Column(Float, nullable=False)                           # ставка финансирования
+

@@ -2,10 +2,10 @@ import asyncio
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.db.schemas import RiskLog, TradeORM, UserORM
+from app.db.schemas import RiskLog, TradeORM, UserORM, FundingRateORM   # 🔹 добавили FundingRateORM
 from app.utils.logger import logger
 from app.services.rabbitmq import RabbitMQBroker
-from app.services.exchange import load_strategies   # ✅ теперь импорт из exchange.py
+from app.services.exchange import load_strategies, get_funding_rate, get_mark_price   # 🔹 новые методы
 from app.services.risk_service import load_risk_settings
 
 RISK_PROFILES = {
@@ -25,18 +25,56 @@ class RiskService:
 		self.RISK_CONFIG = {}
 		self._user_risk_cache = {}
 
-		# ✅ сразу подтягиваем конфиги при создании сервиса
 		asyncio.create_task(self.refresh_config())
 
 	async def refresh_config(self):
 		"""Обновить стратегии и риск‑параметры из БД"""
 		try:
-			self.STRATEGY_CONFIG = await load_strategies(self.db_session)   # ✅ из exchange.py
+			self.STRATEGY_CONFIG = await load_strategies(self.db_session)
 			self.RISK_CONFIG = await load_risk_settings(self.db_session)
 			self._user_risk_cache.clear()
 			logger.info("♻️ RiskService configs refreshed")
 		except Exception as e:
 			logger.error(f"❌ Failed to refresh configs: {e}")
+
+	# --- FUNDING RATE ---
+	async def save_funding_rate(self, symbol: str):
+		"""Получить и сохранить ставку финансирования в БД."""
+		try:
+			funding = await get_funding_rate(symbol)
+			if "error" in funding:
+					return funding
+
+			record = FundingRateORM(
+					symbol=symbol,
+					rate=funding["fundingRate"],
+					timestamp=funding["timestamp"]
+			)
+			self.db_session.add(record)
+			await self.db_session.commit()
+			logger.info(f"✅ Funding rate saved for {symbol}: {funding['fundingRate']}")
+			return record
+		except Exception as e:
+			logger.error(f"❌ Failed to save funding rate for {symbol}: {e}")
+			return {"error": str(e)}
+
+	# --- LIQUIDATION RISK ---
+	async def check_liquidation_risk(self, symbol: str, entry_price: float, leverage: int) -> bool:
+		"""Проверка приближения к ликвидации через mark price."""
+		try:
+			mark = await get_mark_price(symbol)
+			if "error" in mark:
+					return False
+
+			mark_price = mark["markPrice"]
+			liquidation_threshold = entry_price * (1 - 1 / leverage)
+			if mark_price <= liquidation_threshold:
+					logger.warning(f"⚠️ {symbol} близко к ликвидации! Mark={mark_price}, Entry={entry_price}")
+					return True
+			return False
+		except Exception as e:
+			logger.error(f"❌ Liquidation risk check failed for {symbol}: {e}")
+			return False
 
 	async def get_user_risk_config(self, user_id: int) -> dict:
 		"""Возвращает индивидуальные параметры риска пользователя (с кэшированием)."""
