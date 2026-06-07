@@ -1,5 +1,4 @@
 # app/services/orders.py
-import ccxt.async_support as ccxt
 import asyncio
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,38 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.utils.logger import logger
 from app.services.risk import RiskService
-from app.services.rabbitmq import RabbitMQBroker
+from app.broker.rabbitmq import RabbitMQBroker
 from app.db.schemas import TradeORM
 from app.services.ml import MLService
-from app.services.exchange import load_strategies
+from app.services.exchange import load_strategies, get_ohlcv, get_exchange 
 from app.db.session import async_engine
-from app.services.exchange import get_ohlcv
-
 
 broker = RabbitMQBroker()
 asyncio.create_task(broker.connect())
 
 ml_service = MLService()
 ml_service.load_model("models/sklearn_model.pkl", model_type="sklearn")
-
-# --- INIT ---
-def get_exchange():
-	exchange_class = getattr(ccxt, settings.EXCHANGE_CONFIG["name"])
-	exchange = exchange_class({
-		"apiKey": settings.EXCHANGE_CONFIG["api_key"],
-		"secret": settings.EXCHANGE_CONFIG["api_secret"],
-		"enableRateLimit": True,
-		"test": settings.EXCHANGE_CONFIG["mode"] == "testnet",
-		"adjustForTimeDifference": True,
-	})
-
-	trading_mode = settings.TRADING_MODE
-	if trading_mode == "futures":
-		exchange.options["defaultType"] = "linear"
-	else:
-		exchange.options["defaultType"] = "spot"
-
-	return exchange
 
 # --- BALANCE ---
 async def get_balance(currency: str = "USDT"):
@@ -55,16 +33,10 @@ async def build_features(symbol: str, price: float, db_session: AsyncSession) ->
 	"""
 	Формируем признаки для ML модели на основе реальных свечей.
 	"""
-	# Берём последние 100 часовых свечей
 	df = await get_ohlcv(db_session, symbol=symbol, timeframe="1h", limit=100, as_dataframe=True)
-
-	# Готовим признаки через MLService
 	prepared = ml_service.prepare_data(df.to_dict(orient="records"))
-
-	# Берём последнюю строку как актуальные признаки
 	features = prepared.iloc[-1].fillna(0).to_dict()
 	return features
-
 
 # --- ORDERS ---
 async def create_order(
@@ -111,7 +83,6 @@ async def create_order(
 			stop_loss_pct = risk_service.STRATEGY_CONFIG[symbol].get("stop_loss", 0.02)
 			total_loss_pct = risk_service.RISK_CONFIG.get("default_trade_loss_pct", 0.01)
 
-			# --- Адаптивная аллокация ---
 			position_size = await risk_service.calculate_position_size(
 					symbol=symbol,
 					deposit=deposit,
@@ -293,7 +264,6 @@ async def create_oco_order(
 		exchange = get_exchange()
 		params = {"type": "oco", "price": price, "stopPrice": stop_price}
 
-		# --- ML прогноз ---
 		features = await build_features(symbol, price or 1.0, risk_service.db_session)
 		prediction = ml_service.predict_with_confidence(features)
 		confidence_score = prediction["confidence_score"]
@@ -390,4 +360,3 @@ async def create_oco_order(
 			"error": f"OCO order failed: {e}"
 		})
 		return {"error": str(e)}
-

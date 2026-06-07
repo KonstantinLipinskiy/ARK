@@ -69,12 +69,27 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 		raise HTTPException(status_code=400, detail="Direction must be 'buy' or 'sell'")
 
 	features = {
-		"ema": getattr(signal, "ema", 0.0),
-		"rsi": getattr(signal, "rsi", 0.0),
-		"macd": getattr(signal, "strength", 0.0),
-		"hour": signal.timestamp.hour if signal.timestamp else 0,
-		"atr": getattr(signal, "atr", 0.0)
+	"ema": getattr(signal, "ema", 0.0),
+	"rsi": getattr(signal, "rsi", 0.0),
+	"macd": getattr(signal, "strength", 0.0),
+	"hour": signal.timestamp.hour if signal.timestamp else 0,
+	"atr": getattr(signal, "atr", 0.0),
+	"obv": getattr(signal, "obv", 0.0),
+	"stochastic": getattr(signal, "stochastic", 0.0),
+	"vwap": getattr(signal, "vwap", 0.0),
+	"ichimoku": getattr(signal, "ichimoku", 0.0),
+	"volume": getattr(signal, "volume", 0.0),
+	"volume_ma": getattr(signal, "volume_ma", 0.0),
+	"bollinger": getattr(signal, "bollinger", 0.0),
+	"bollinger_upper": getattr(signal, "bollinger_upper", 0.0),
+	"bollinger_lower": getattr(signal, "bollinger_lower", 0.0),
+	"news_sentiment": getattr(signal, "news_sentiment", 0.0),
+	"last_price": getattr(signal, "last_price", 0.0),
+	"spread": getattr(signal, "spread", 0.0),
+	"liquidity_imbalance": getattr(signal, "liquidity_imbalance", 0.0),
+	"mark_price": getattr(signal, "mark_price", 0.0)
 	}
+
 
 	if ml_service.model:
 		try:
