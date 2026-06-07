@@ -85,3 +85,5 @@ migrations/versions/
 *.tar.gz
 *.zip
 *.rar
+
+NUL
