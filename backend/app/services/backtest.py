@@ -26,14 +26,11 @@ asyncio.create_task(broker.connect())
 def build_features(row: pd.Series) -> dict:
 	"""Формируем полный набор признаков для ML модели из строки DataFrame."""
 	return {
-		# базовые
 		"ema": row.get("ema_short", 0),
 		"rsi": row.get("rsi", 50),
 		"macd": row.get("macd_line", 0),
 		"hour": pd.to_datetime(row.get("timestamp", datetime.utcnow())).hour,
 		"atr": row.get("atr", 0),
-
-		# расширенные индикаторы
 		"bollinger_upper": row.get("boll_upper", 0),
 		"bollinger_lower": row.get("boll_lower", 0),
 		"bollinger": (row.get("close", 0) - row.get("boll_sma", 0)),
@@ -43,19 +40,13 @@ def build_features(row: pd.Series) -> dict:
 		"ichimoku": row.get("ichimoku", 0),
 		"volume": row.get("volume", 0),
 		"volume_ma": row.get("vol_sma", 0),
-
-		# новостной сентимент (если есть)
 		"news_sentiment": row.get("news_sentiment", 0),
-
-		# рыночные данные (если подтягиваются через enrich_with_market_data)
 		"last_price": row.get("last_price", 0),
 		"spread": row.get("spread", 0),
 		"liquidity_imbalance": row.get("liquidity_imbalance", 0),
 		"mark_price": row.get("mark_price", 0)
 	}
 
-
-# --- Оптимизация индикаторов через numba ---
 @njit
 def fast_equity_curve(profits: np.ndarray, initial_deposit: float):
 	equity_curve = np.cumsum(profits) + initial_deposit
@@ -63,9 +54,7 @@ def fast_equity_curve(profits: np.ndarray, initial_deposit: float):
 	drawdowns = (equity_curve - peak) / peak
 	return equity_curve, drawdowns
 
-# --- Основной бэктест ---
 async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, session: AsyncSession = None):
-	"""Прогон одной стратегии для пары"""
 	trades = []
 	position = None
 	market_type = settings.TRADING_MODE
@@ -163,6 +152,12 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 						else:
 							signals.append(False)
 
+				# --- Фильтр по sentiment ---
+				if row.get("news_sentiment", 0) < -0.5 and direction == "long":
+					signals.append(False)
+				if row.get("news_sentiment", 0) > 0.5 and direction == "short":
+					signals.append(False)
+
 				if all(signals):
 					entry_price = row["close"]
 					stop_price = risk.apply_stop_loss(entry_price, strategy["stop_loss"], direction)
@@ -190,7 +185,8 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 						"status": "open",
 						"side": direction,
 						"amount": amount,
-						"leverage": leverage
+						"leverage": leverage,
+						"news_sentiment": row.get("news_sentiment", 0)
 					}
 					await broker.publish_telegram({
 						"type": "trade",
@@ -208,64 +204,36 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 
 		elif position is not None:
 			price = row["close"]
-
+			# --- Логика выхода (без изменений, но сохраняем news_sentiment в сделке) ---
 			if position["side"] == "long":
 				if price <= position["stop"]:
 					position["exit"] = price; position["status"] = "stopped"
-					trades.append(position)
-					await broker.publish_telegram({
-						"type": "trade",
-						"trade": {**position, "pair": pair}
-					})
-					position = None
+					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] - 2 * atr_value
 					if price <= dynamic_stop:
 						position["exit"] = price; position["status"] = "atr_stop"
-						trades.append(position)
-						await broker.publish_telegram({
-							"type": "trade",
-							"trade": {**position, "pair": pair}
-						})
-						position = None
+						trades.append(position); position = None
 				elif price >= position["tp"][0]:
 					position["exit"] = price; position["status"] = "take_profit"
 					trades.append(position)
-					await broker.publish_telegram({
-						"type": "trade",
-						"trade": {**position, "pair": pair}
-					})
 					position["tp"].pop(0)
 					if len(position["tp"]) == 0: position = None
 
 			elif position["side"] == "short":
 				if price >= position["stop"]:
 					position["exit"] = price; position["status"] = "stopped"
-					trades.append(position)
-					await broker.publish_telegram({
-						"type": "trade",
-						"trade": {**position, "pair": pair}
-					})
-					position = None
+					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] + 2 * atr_value
 					if price >= dynamic_stop:
 						position["exit"] = price; position["status"] = "atr_stop"
-						trades.append(position)
-						await broker.publish_telegram({
-							"type": "trade",
-							"trade": {**position, "pair": pair}
-						})
-						position = None
+						trades.append(position); position = None
 				elif price <= position["tp"][0]:
 					position["exit"] = price; position["status"] = "take_profit"
 					trades.append(position)
-					await broker.publish_telegram({
-						"type": "trade",
-						"trade": {**position, "pair": pair}
-					})
 					position["tp"].pop(0)
 					if len(position["tp"]) == 0: position = None
 	return trades
@@ -273,7 +241,8 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 # --- Метрики ---
 def calculate_metrics(trades, initial_deposit=1000):
 	if not trades:
-		return {"winrate": 0, "avg_profit": 0, "max_drawdown": 0, "sharpe": 0}
+		return {"winrate": 0, "avg_profit": 0, "max_drawdown": 0, "sharpe": 0,
+				"avg_sentiment_win": 0, "avg_sentiment_loss": 0}
 
 	profits = np.array([
 		(t["exit"] - t["entry"]) * t.get("amount", 1.0) * t.get("leverage", 1)
@@ -288,29 +257,37 @@ def calculate_metrics(trades, initial_deposit=1000):
 	avg_profit = np.mean(profits) if len(profits) > 0 else 0
 	sharpe = (np.mean(profits) / np.std(profits)) * np.sqrt(252) if np.std(profits) > 0 else 0
 
+	avg_sentiment_win = np.mean([t.get("news_sentiment", 0) for t in trades
+									if "exit" in t and (t["exit"] - t["entry"]) > 0]) if wins.size > 0 else 0
+	avg_sentiment_loss = np.mean([t.get("news_sentiment", 0) for t in trades
+									if "exit" in t and (t["exit"] - t["entry"]) <= 0]) if len(trades) > len(wins) else 0
+
 	return {
 		"winrate": round(winrate, 2),
 		"avg_profit": round(avg_profit, 4),
 		"max_drawdown": round(max_drawdown, 4),
-		"sharpe": round(sharpe, 2)
+		"sharpe": round(sharpe, 2),
+		"avg_sentiment_win": round(avg_sentiment_win, 4),
+		"avg_sentiment_loss": round(avg_sentiment_loss, 4)
 	}
 
-# --- Сохранение сделок и метрик через CRUD ---
+# --- Сохранение сделок и метрик ---
 async def save_trades_to_db(trades, pair: str, strategy_name: str = "default", user_id: int = 1):
 	async with get_session() as session:
 		for t in trades:
 			trade_model = Trade(
-					symbol=pair,
-					side=t.get("side", "buy"),
-					amount=t.get("amount", 1.0),
-					price=t["entry"],
-					status=t["status"],
-					leverage=t.get("leverage", 1.0),
-					user_id=user_id,
-					entry_price=t["entry"],
-					exit_price=t.get("exit"),
-					profit_loss=(t.get("exit", 0) - t["entry"]) * t.get("amount", 1.0) * t.get("leverage", 1)
-						if "exit" in t else None
+				symbol=pair,
+				side=t.get("side", "buy"),
+				amount=t.get("amount", 1.0),
+				price=t["entry"],
+				status=t["status"],
+				leverage=t.get("leverage", 1.0),
+				user_id=user_id,
+				entry_price=t["entry"],
+				exit_price=t.get("exit"),
+				profit_loss=(t.get("exit", 0) - t["entry"]) * t.get("amount", 1.0) * t.get("leverage", 1)
+					if "exit" in t else None,
+				news_sentiment=t.get("news_sentiment", 0)
 			)
 			await crud.create_trade(session, trade_model)
 
@@ -323,6 +300,8 @@ async def save_metrics_to_db(metrics: dict, pair: str, strategy_name: str = "def
 			"avg_profit": metrics["avg_profit"],
 			"max_drawdown": metrics["max_drawdown"],
 			"sharpe": metrics["sharpe"],
+			"avg_sentiment_win": metrics["avg_sentiment_win"],
+			"avg_sentiment_loss": metrics["avg_sentiment_loss"],
 			"user_id": user_id
 		}
 		await crud.create_backtest_report(session, report_data)
@@ -373,36 +352,36 @@ if __name__ == "__main__":
 			tasks = []
 
 			for pair, strategy_list in strategies.items():
-					df = pd.read_csv(f"data/{pair.replace('/', '')}_1h.csv")
+				df = pd.read_csv(f"data/{pair.replace('/', '')}_1h.csv")
+				# 🔹 Подмешиваем news_sentiment через MLService
+				df = ml_service.prepare_data(df.to_dict("records"), symbol=pair.split("/")[0].lower())
 
-					for strategy in strategy_list:
-						strategy_name = strategy.get("name", "default")
+				for strategy in strategy_list:
+					strategy_name = strategy.get("name", "default")
 
-						async def run_single_backtest(pair=pair, strategy=strategy, strategy_name=strategy_name, df=df.copy()):
-							results = await backtest_strategy(df, pair, strategy, session=session)
-							metrics = calculate_metrics(results)
+					async def run_single_backtest(pair=pair, strategy=strategy, strategy_name=strategy_name, df=df.copy()):
+						results = await backtest_strategy(df, pair, strategy, session=session)
+						metrics = calculate_metrics(results)
 
-							all_metrics[f"{pair}_{strategy_name}"] = metrics
-							all_results[f"{pair}_{strategy_name}"] = results
+						all_metrics[f"{pair}_{strategy_name}"] = metrics
+						all_results[f"{pair}_{strategy_name}"] = results
 
-							await save_trades_to_db(results, pair, strategy_name=strategy_name)
-							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name)
+						await save_trades_to_db(results, pair, strategy_name=strategy_name)
+						await save_metrics_to_db(metrics, pair, strategy_name=strategy_name)
 
-							# --- Автоматическое обучение ML модели на истории ---
-							try:
-									df_trades = pd.DataFrame(results)
-									if not df_trades.empty:
-										df_trades["result"] = (df_trades["exit"] - df_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
-										train_metrics = ml_service.train(df_trades, model_type="sklearn")
-										logger.info(f"ML обучение завершено для {pair} ({strategy_name}): {train_metrics}")
-							except Exception as e:
-									logger.error(f"Ошибка обучения ML на истории {pair} ({strategy_name}): {e}")
+						try:
+							df_trades = pd.DataFrame(results)
+							if not df_trades.empty:
+								df_trades["result"] = (df_trades["exit"] - df_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
+								train_metrics = ml_service.train(df_trades, model_type="sklearn")
+								logger.info(f"ML обучение завершено для {pair} ({strategy_name}): {train_metrics}")
+						except Exception as e:
+							logger.error(f"Ошибка обучения ML на истории {pair} ({strategy_name}): {e}")
 
-							plot_backtest(df, results, pair, strategy_name)
+						plot_backtest(df, results, pair, strategy_name)
 
-						tasks.append(run_single_backtest())
+					tasks.append(run_single_backtest())
 
-			# 🔹 Запускаем все бэктесты параллельно
 			await asyncio.gather(*tasks)
 
 	loop.run_until_complete(run_backtests())
@@ -417,6 +396,4 @@ if __name__ == "__main__":
 			df_trades = pd.DataFrame(trades)
 			sheet_name = key.replace("/", "_")[:30]
 			df_trades.to_excel(writer, sheet_name=sheet_name)
-
 	print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
-

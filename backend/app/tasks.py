@@ -4,6 +4,8 @@ from app.services.exchange import update_ohlcv_for_all_pairs, get_ticker, get_or
 from app.services.risk import RiskService
 from app.utils.logger import logger
 import asyncio
+from app.services.news_loader import NewsLoader
+from app.config import settings
 
 # --- OHLCV обновление ---
 @celery_app.task
@@ -46,4 +48,27 @@ def monitor_order_book_task(symbol: str):
 			logger.info(f"📊 {symbol} OrderBook: Bids={total_bids:.2f} Asks={total_asks:.2f} Imbalance={imbalance:.2f}")
 		else:
 			logger.error(f"❌ Ошибка получения стакана для {symbol}: {order_book['error']}")
+	asyncio.run(run())
+
+# --- Новости ---
+@celery_app.task
+def fetch_crypto_news_task(pair="BTC/USDT"):
+	async def run():
+		# Берём первую часть пары (BTC, ETH, BNB, SOL, ADA)
+		symbol = pair.split("/")[0].lower()
+
+		loader = NewsLoader(newsdata_api_key=settings.NEWSDATA_API_KEY)
+		news = loader.fetch_newsdata(query=symbol)
+		rss = loader.fetch_coindesk_rss()
+
+		# Фильтрация RSS по ключевому слову монеты
+		filtered_rss = [n for n in rss if symbol.capitalize() in n or symbol.upper() in n]
+
+		all_news = news + filtered_rss
+		if all_news:
+			logger.info(f"📰 Получено {len(all_news)} новостей для {pair}")
+			# здесь можно сохранить в БД или Redis
+		else:
+			logger.warning(f"⚠️ Новости для {pair} не получены")
+
 	asyncio.run(run())

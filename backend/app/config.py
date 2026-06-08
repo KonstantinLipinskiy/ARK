@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 	CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 	CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 
+	# 🔹 NewsData.io API Key
+	NEWSDATA_API_KEY: str = os.getenv("NEWSDATA_API_KEY", "")
+
 
 settings = Settings()
 
@@ -65,6 +68,7 @@ REDIS_CONFIG = {
 	"port": int(os.getenv("REDIS_PORT", 6379)),
 	"db": int(os.getenv("REDIS_DB", 0)),
 }
+
 
 
 # Это нужно будер реализлвать при деплоии

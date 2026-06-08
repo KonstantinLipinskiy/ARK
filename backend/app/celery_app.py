@@ -7,6 +7,8 @@ celery_app = Celery(
 	backend=settings.CELERY_RESULT_BACKEND
 )
 
+PAIRS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "ADA/USDT"]
+
 celery_app.conf.beat_schedule = {
 	# --- OHLCV ---
 	"update-ohlcv-hourly": {
@@ -19,42 +21,45 @@ celery_app.conf.beat_schedule = {
 		"schedule": 86400.0,  # раз в сутки
 		"args": ["1d"]
 	},
+}
 
-	# --- Funding Rate ---
-	"update-funding-rate-btc": {
+# --- Funding Rate ---
+for pair in PAIRS:
+	symbol = pair
+	name = pair.split("/")[0].lower()
+	celery_app.conf.beat_schedule[f"update-funding-rate-{name}"] = {
 		"task": "app.tasks.update_funding_rate_task",
-		"schedule": 28800.0,  # каждые 8 часов (биржи обновляют funding rate)
-		"args": ["BTC/USDT"]
-	},
-	"update-funding-rate-eth": {
-		"task": "app.tasks.update_funding_rate_task",
-		"schedule": 28800.0,
-		"args": ["ETH/USDT"]
-	},
+		"schedule": 28800.0,  # каждые 8 часов
+		"args": [symbol]
+	}
 
-	# --- Мониторинг тикеров ---
-	"monitor-ticker-btc": {
+# --- Мониторинг тикеров ---
+for pair in PAIRS:
+	symbol = pair
+	name = pair.split("/")[0].lower()
+	celery_app.conf.beat_schedule[f"monitor-ticker-{name}"] = {
 		"task": "app.tasks.monitor_ticker_task",
 		"schedule": 600.0,  # каждые 10 минут
-		"args": ["BTC/USDT"]
-	},
-	"monitor-ticker-eth": {
-		"task": "app.tasks.monitor_ticker_task",
-		"schedule": 600.0,
-		"args": ["ETH/USDT"]
-	},
+		"args": [symbol]
+	}
 
-	# --- Мониторинг стакана ---
-	"monitor-order-book-btc": {
+# --- Мониторинг стакана ---
+for pair in PAIRS:
+	symbol = pair
+	name = pair.split("/")[0].lower()
+	celery_app.conf.beat_schedule[f"monitor-order-book-{name}"] = {
 		"task": "app.tasks.monitor_order_book_task",
 		"schedule": 900.0,  # каждые 15 минут
-		"args": ["BTC/USDT"]
-	},
-	"monitor-order-book-eth": {
-		"task": "app.tasks.monitor_order_book_task",
-		"schedule": 900.0,
-		"args": ["ETH/USDT"]
-	},
-}
+		"args": [symbol]
+	}
+
+# --- Новости ---
+for pair in PAIRS:
+	symbol = pair.split("/")[0].lower()
+	celery_app.conf.beat_schedule[f"fetch-news-{symbol}-hourly"] = {
+		"task": "app.tasks.fetch_crypto_news_task",
+		"schedule": 3600.0,  # каждый час
+		"args": [symbol]
+	}
 
 celery_app.conf.timezone = "UTC"

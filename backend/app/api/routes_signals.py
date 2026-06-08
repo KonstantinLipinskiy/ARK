@@ -3,14 +3,17 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
+
 from app.models.signal import Signal
 from app.db.session import get_db
 from app.db import crud
 from app.services.telegram import send_trade_notification
 from app.services.ml import MLService
+from app.services.news_loader import NewsLoader
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
 from app.utils.logger import logger
+from app.config import settings
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -22,6 +25,7 @@ except Exception:
 
 rabbitmq = RabbitMQBroker()
 redis_cache = RedisCache()
+news_loader = NewsLoader(newsdata_api_key=settings.NEWSDATA_API_KEY)
 
 @router.get("/")
 async def get_signals(
@@ -53,7 +57,6 @@ async def get_signals(
 		logger.error(f"❌ Ошибка БД при получении сигналов: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-
 @router.get("/{signal_id}", response_model=Signal)
 async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
 	result = await crud.update_signal(db, signal_id, {}) 
@@ -62,35 +65,45 @@ async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
 	logger.info(f"🔎 Получен сигнал ID={signal_id}")
 	return result
 
-
 @router.post("/", response_model=Signal)
 async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 	if signal.direction not in ["buy", "sell"]:
 		raise HTTPException(status_code=400, detail="Direction must be 'buy' or 'sell'")
 
 	features = {
-	"ema": getattr(signal, "ema", 0.0),
-	"rsi": getattr(signal, "rsi", 0.0),
-	"macd": getattr(signal, "strength", 0.0),
-	"hour": signal.timestamp.hour if signal.timestamp else 0,
-	"atr": getattr(signal, "atr", 0.0),
-	"obv": getattr(signal, "obv", 0.0),
-	"stochastic": getattr(signal, "stochastic", 0.0),
-	"vwap": getattr(signal, "vwap", 0.0),
-	"ichimoku": getattr(signal, "ichimoku", 0.0),
-	"volume": getattr(signal, "volume", 0.0),
-	"volume_ma": getattr(signal, "volume_ma", 0.0),
-	"bollinger": getattr(signal, "bollinger", 0.0),
-	"bollinger_upper": getattr(signal, "bollinger_upper", 0.0),
-	"bollinger_lower": getattr(signal, "bollinger_lower", 0.0),
-	"news_sentiment": getattr(signal, "news_sentiment", 0.0),
-	"last_price": getattr(signal, "last_price", 0.0),
-	"spread": getattr(signal, "spread", 0.0),
-	"liquidity_imbalance": getattr(signal, "liquidity_imbalance", 0.0),
-	"mark_price": getattr(signal, "mark_price", 0.0)
+		"ema": getattr(signal, "ema", 0.0),
+		"rsi": getattr(signal, "rsi", 0.0),
+		"macd": getattr(signal, "strength", 0.0),
+		"hour": signal.timestamp.hour if signal.timestamp else 0,
+		"atr": getattr(signal, "atr", 0.0),
+		"obv": getattr(signal, "obv", 0.0),
+		"stochastic": getattr(signal, "stochastic", 0.0),
+		"vwap": getattr(signal, "vwap", 0.0),
+		"ichimoku": getattr(signal, "ichimoku", 0.0),
+		"volume": getattr(signal, "volume", 0.0),
+		"volume_ma": getattr(signal, "volume_ma", 0.0),
+		"bollinger": getattr(signal, "bollinger", 0.0),
+		"bollinger_upper": getattr(signal, "bollinger_upper", 0.0),
+		"bollinger_lower": getattr(signal, "bollinger_lower", 0.0),
+		"last_price": getattr(signal, "last_price", 0.0),
+		"spread": getattr(signal, "spread", 0.0),
+		"liquidity_imbalance": getattr(signal, "liquidity_imbalance", 0.0),
+		"mark_price": getattr(signal, "mark_price", 0.0)
 	}
 
+	# 🔹 Подтягиваем свежие новости и считаем sentiment
+	try:
+		latest_news = news_loader.fetch_newsdata(query=signal.symbol.split("/")[0].lower())
+		if latest_news:
+			df_news = ml_service.prepare_data([{"news": text} for text in latest_news])
+			features["news_sentiment"] = df_news["news_sentiment"].mean()
+		else:
+			features["news_sentiment"] = 0.0
+	except Exception as e:
+		logger.error(f"❌ Ошибка загрузки новостей: {e}")
+		features["news_sentiment"] = 0.0
 
+	# ML фильтрация
 	if ml_service.model:
 		try:
 			prob = ml_service.predict_signal(features)
