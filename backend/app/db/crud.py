@@ -10,7 +10,7 @@ from app.models.user import User, UserCreate
 from app.utils.logger import logger
 from app.config import settings
 from app.utils.security import hash_password
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 
 # ---------- Trades ----------
@@ -694,4 +694,94 @@ async def delete_tokens_by_user(db: AsyncSession, user_id: int) -> bool:
 	except SQLAlchemyError as e:
 		await db.rollback()
 		logger.error(f"Ошибка удаления refresh токенов пользователя: {e}")
+		raise
+
+
+# ---------- News ----------
+async def create_news(db: AsyncSession, symbol: str, title: str, source: str, published_at: datetime):
+	"""Создать новость и сохранить в БД."""
+	try:
+		db_news = schemas.NewsORM(
+			symbol=symbol,
+			title=title,
+			source=source,
+			published_at=published_at
+		)
+		db.add(db_news)
+		await db.commit()
+		await db.refresh(db_news)
+		return db_news
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка создания новости: {e}")
+		raise
+
+
+async def get_news(
+	db: AsyncSession,
+	skip: int = 0,
+	limit: int = 100,
+	symbol: str = None,
+	source: str = None,
+	date_from: datetime = None,
+	date_to: datetime = None
+):
+	"""Получить список новостей с фильтрацией и пагинацией."""
+	query = select(schemas.NewsORM)
+	if symbol:
+		query = query.filter(schemas.NewsORM.symbol == symbol)
+	if source:
+		query = query.filter(schemas.NewsORM.source == source)
+	if date_from:
+		query = query.filter(schemas.NewsORM.published_at >= date_from)
+	if date_to:
+		query = query.filter(schemas.NewsORM.published_at <= date_to)
+
+	query = query.order_by(schemas.NewsORM.published_at.desc())
+
+	total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+	result = await db.execute(query.offset(skip).limit(limit))
+	news = result.scalars().all()
+
+	return {
+		"items": news,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}
+
+
+async def delete_news(db: AsyncSession, news_id: int):
+	"""Удалить новость по ID."""
+	result = await db.execute(select(schemas.NewsORM).filter(schemas.NewsORM.id == news_id))
+	db_news = result.scalars().first()
+	if not db_news:
+		return None
+	await db.delete(db_news)
+	try:
+		await db.commit()
+		return True
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка удаления новости: {e}")
+		raise
+
+
+async def delete_old_news(db: AsyncSession, days: int = 30):
+	"""Удалить новости старше N дней (например, чистка старых записей)"""
+	cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+	result = await db.execute(
+		select(schemas.NewsORM).filter(schemas.NewsORM.published_at < cutoff)
+	)
+	old_news = result.scalars().all()
+	if not old_news:
+		return 0
+	for n in old_news:
+		await db.delete(n)
+	try:
+		await db.commit()
+		return len(old_news)
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка удаления старых новостей: {e}")
 		raise

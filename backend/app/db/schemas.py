@@ -259,3 +259,12 @@ class FundingRateORM(Base):
 	timestamp = Column(BigInteger, nullable=False, index=True)     # время получения ставки (Unix ms)
 	rate = Column(Float, nullable=False)                           # ставка финансирования
 
+class NewsORM(Base):
+	__tablename__ = "news"
+
+	id = Column(Integer, primary_key=True, index=True)
+	symbol = Column(String(20), nullable=False, index=True)   # монета или пара (BTC, ETH, SOL)
+	title = Column(String(255), nullable=False)               # заголовок новости
+	source = Column(String(100), nullable=True)               # источник (NewsData.io, CoinDesk)
+	published_at = Column(DateTime, nullable=False)           # время публикации
+	created_at = Column(DateTime, server_default=func.now())  # время сохранения в БД
