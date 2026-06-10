@@ -5,10 +5,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import time
 from app import config
-from app.api import routes_signals, routes_trades, routes_users, routes_admin, routes_indicators
+from app.api import routes_signals, routes_trades, routes_users, routes_admin, routes_indicators, routes_news
 from app.services.telegram import telegram_service
-from app.broker.rabbitmq import init_rabbitmq, broker
-from app.cache.redis import init_redis, redis_client
+from app.broker.rabbitmq import init_rabbitmq, broker, close_rabbitmq
+from app.cache.redis import init_redis, redis_client, close_redis
 from app.monitoring import prometheus
 from app.utils.logger import logger
 from prometheus_client import Counter, Histogram
@@ -18,20 +18,6 @@ from app.services.risk import RiskService   # ✅ импорт RiskService
 
 REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests")
 REQUEST_LATENCY = Histogram("http_request_duration_seconds", "Request latency in seconds")
-
-app = FastAPI(
-	title="ARK Trading Bot",
-	description="Автоматизированный торговый бот: спот, фьючерсы, ML, динамическая аллокация",
-	version="1.0.0"
-)
-
-app.add_middleware(
-	CORSMiddleware,
-	allow_origins=config.settings.ALLOWED_ORIGINS,
-	allow_credentials=True,
-	allow_methods=["*"],
-	allow_headers=["*"],
-)
 
 security = HTTPBearer()
 
@@ -43,6 +29,42 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 		raise HTTPException(status_code=401, detail="Token expired")
 	except jwt.InvalidTokenError:
 		raise HTTPException(status_code=401, detail="Invalid token")
+
+async def lifespan(app: FastAPI):
+	# 🚀 Запуск
+	logger.info("Запуск ARK Bot API...")
+	await init_rabbitmq()
+	await init_redis()
+
+	# ✅ создаём RiskService и явно подтягиваем конфиги
+	async with async_session() as db_session:
+		app.state.risk_service = RiskService(db_session)
+		await app.state.risk_service.refresh_config()
+
+	await telegram_service.send_message("ARK Bot запущен ✅")
+
+	yield  # <-- здесь приложение работает
+
+	# 🛑 Остановка
+	logger.info("Остановка ARK Bot API...")
+	await close_rabbitmq()
+	await close_redis()
+	await telegram_service.send_message("ARK Bot остановлен ❌")
+
+app = FastAPI(
+	title="ARK Trading Bot",
+	description="Автоматизированный торговый бот: спот, фьючерсы, ML, динамическая аллокация",
+	version="1.0.0",
+	lifespan=lifespan
+)
+
+app.add_middleware(
+	CORSMiddleware,
+	allow_origins=config.settings.ALLOWED_ORIGINS,
+	allow_credentials=True,
+	allow_methods=["*"],
+	allow_headers=["*"],
+)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -70,6 +92,7 @@ app.include_router(routes_trades.router, prefix="/api/v1/trades", tags=["Trades"
 app.include_router(routes_users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(routes_admin.router, prefix="/api/v1/admin", tags=["Admin"])
 app.include_router(routes_indicators.router, prefix="/api/v1/indicators", tags=["Indicators"])
+app.include_router(routes_news.router, prefix="/api/v1/news", tags=["News"])
 app.include_router(prometheus.router)
 
 @app.get("/")
@@ -93,8 +116,6 @@ async def health_check():
 		"market_type": config.settings.TRADING_MODE
 	}
 
-
-
 @app.get("/risk-check")
 async def risk_check(request: Request):
 	risk_service: RiskService = request.app.state.risk_service
@@ -102,22 +123,3 @@ async def risk_check(request: Request):
 		"config_loaded": bool(risk_service.STRATEGY_CONFIG),
 		"risk_config_keys": list(risk_service.RISK_CONFIG.keys())
 	}
-
-
-@app.on_event("startup")
-async def startup_event():
-	logger.info("Запуск ARK Bot API...")
-	await init_rabbitmq()
-	await init_redis()
-
-	# ✅ создаём RiskService и явно подтягиваем конфиги
-	async with async_session() as db_session:
-		app.state.risk_service = RiskService(db_session)
-		await app.state.risk_service.refresh_config()
-
-	await telegram_service.send_message("ARK Bot запущен ✅")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-	logger.info("Остановка ARK Bot API...")
-	await telegram_service.send_message("ARK Bot остановлен ❌")

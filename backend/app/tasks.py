@@ -6,6 +6,7 @@ from app.utils.logger import logger
 import asyncio
 from app.services.news_loader import NewsLoader
 from app.config import settings
+from app.db import crud
 
 # --- OHLCV обновление ---
 @celery_app.task
@@ -54,7 +55,6 @@ def monitor_order_book_task(symbol: str):
 @celery_app.task
 def fetch_crypto_news_task(pair="BTC/USDT"):
 	async def run():
-		# Берём первую часть пары (BTC, ETH, BNB, SOL, ADA)
 		symbol = pair.split("/")[0].lower()
 
 		loader = NewsLoader(newsdata_api_key=settings.NEWSDATA_API_KEY)
@@ -62,13 +62,28 @@ def fetch_crypto_news_task(pair="BTC/USDT"):
 		rss = loader.fetch_coindesk_rss()
 
 		# Фильтрация RSS по ключевому слову монеты
-		filtered_rss = [n for n in rss if symbol.capitalize() in n or symbol.upper() in n]
+		filtered_rss = [n for n in rss if symbol.upper() in n or symbol.capitalize() in n]
 
 		all_news = news + filtered_rss
 		if all_news:
 			logger.info(f"📰 Получено {len(all_news)} новостей для {pair}")
-			# здесь можно сохранить в БД или Redis
+
+			# ✅ сохраняем в БД
+			async with get_session() as session:
+				for item in all_news:
+					try:
+						await crud.create_news(
+							session,
+							symbol=symbol.upper(),
+							title=item.get("title"),
+							content=item.get("content", ""),
+							source=item.get("source", "unknown"),
+							published_at=item.get("published_at")
+						)
+					except Exception as e:
+						logger.error(f"❌ Ошибка сохранения новости: {e}")
 		else:
 			logger.warning(f"⚠️ Новости для {pair} не получены")
 
 	asyncio.run(run())
+
