@@ -10,12 +10,14 @@ import torch.optim as optim
 from tensorflow import keras
 from transformers import pipeline
 import numpy as np
+from sentence_transformers import SentenceTransformer
 from app.db.vector import VectorDB
 from app.utils.logger import logger
 from app.config import settings
 from app.services.exchange import get_ticker, get_order_book, get_mark_price
 from app.services.news_loader import NewsLoader
-
+from sklearn.model_selection import train_test_split
+from app.utils.metrics import export_ml_metrics
 
 class MLService:
 	def __init__(self):
@@ -23,12 +25,13 @@ class MLService:
 		self.vector_db = VectorDB()
 		self.vector_size = settings.QDRANT_VECTOR_SIZE
 		self.news_loader = NewsLoader(newsdata_api_key=settings.NEWSDATA_API_KEY)
-		self._seen_ids = set()
 		try:
 			self.sentiment_pipeline = pipeline("sentiment-analysis")
+			self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 		except Exception as e:
 			logger.error(f"Ошибка инициализации sentiment pipeline: {e}")
 			self.sentiment_pipeline = None
+			self.embedding_model = None
 
 	# --- ПОДГОТОВКА ДАННЫХ ---
 	def prepare_data(self, trades: list[dict], symbol: str = "bitcoin") -> pd.DataFrame:
@@ -43,32 +46,34 @@ class MLService:
 			latest_news = self.news_loader.fetch_newsdata(query=symbol)
 			rss_news = self.news_loader.fetch_coindesk_rss()
 			all_news = latest_news + rss_news
-			if all_news:
-				df_news = pd.DataFrame([{"news": text} for text in all_news])
-				# фильтруем только df_news
-				df_news = df_news[df_news["news"].apply(lambda x: isinstance(x, str) and len(x.strip()) > 20)]
-				if not df_news.empty and self.sentiment_pipeline:
-					df_news["sentiment"] = df_news["news"].apply(
-						lambda text: self.sentiment_pipeline(text)[0]["score"]
-						if self.sentiment_pipeline(text)[0]["label"] == "POSITIVE"
-						else -self.sentiment_pipeline(text)[0]["score"]
-					)
-					# агрегируем по времени (например, час) и мержим с df
-					df_news = pd.DataFrame([
-						{"news": article["title"], "timestamp": pd.to_datetime(article.get("pubDate"))}
-						for article in all_news if article.get("pubDate")
-					])
-					df_news["hour"] = df_news["timestamp"].dt.hour
-					sentiment_by_hour = df_news.groupby("hour")["sentiment"].mean().reset_index()
-					if "timestamp" in df.columns:
-						df["hour"] = pd.to_datetime(df["timestamp"]).dt.hour
-						df = df.merge(sentiment_by_hour, on="hour", how="left")
-						df["news_sentiment"] = df["sentiment"].fillna(0.0).astype(float)
-						df.drop(columns=["sentiment"], inplace=True)
-					else:
-						df["news_sentiment"] = df_news["sentiment"].mean()
+
+			if all_news and self.sentiment_pipeline:
+				df_news = pd.DataFrame([
+					{
+						"title": article.get("title", ""),
+						"timestamp": pd.to_datetime(article.get("pubDate")),
+						"sentiment": (
+							self.sentiment_pipeline(article.get("title"))[0]["score"]
+							if self.sentiment_pipeline(article.get("title"))[0]["label"] == "POSITIVE"
+							else -self.sentiment_pipeline(article.get("title"))[0]["score"]
+						)
+					}
+					for article in all_news if article.get("pubDate") and isinstance(article.get("title"), str)
+				])
+
+				df_news["hour"] = df_news["timestamp"].dt.hour
+				sentiment_by_hour = df_news.groupby("hour")["sentiment"].mean().reset_index()
+
+				if "timestamp" in df.columns:
+					df["hour"] = pd.to_datetime(df["timestamp"]).dt.hour
+					df = df.merge(sentiment_by_hour, on="hour", how="left")
+					df["news_sentiment"] = df["sentiment"].fillna(0.0).astype(float)
+					df.drop(columns=["sentiment"], inplace=True)
 				else:
-					df["news_sentiment"] = 0.0
+					df["news_sentiment"] = df_news["sentiment"].mean()
+			else:
+				df["news_sentiment"] = 0.0
+
 		else:
 			# если колонка news уже есть в df
 			if self.sentiment_pipeline:
@@ -133,56 +138,158 @@ class MLService:
 		return df
 
 	# --- ОБУЧЕНИЕ ---
+
 	def train(self, df: pd.DataFrame, model_type: str = "sklearn") -> dict:
-		if model_type == "sklearn":
-			X = df[["ema", "rsi", "macd", "hour", "atr",
+		# --- общий набор признаков ---
+		features = ["ema", "rsi", "macd", "hour", "atr",
 					"bollinger_upper", "bollinger_lower", "bollinger",
 					"obv", "stochastic", "vwap", "ichimoku",
 					"volume", "volume_ma", "news_sentiment",
-					"last_price", "spread", "liquidity_imbalance", "mark_price"]].fillna(0)
-			y = df["result"]
+					"last_price", "spread", "liquidity_imbalance", "mark_price"]
+
+		X = df[features].fillna(0)
+		y = df["result"]
+
+		if model_type == "sklearn":
 			X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-			self.model = RandomForestClassifier()
+
+			self.model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
 			self.model.fit(X_train, y_train)
 			y_pred = self.model.predict(X_test)
-			return {
+
+			metrics = {
 				"accuracy": accuracy_score(y_test, y_pred),
 				"precision": precision_score(y_test, y_pred, average="binary"),
-				"recall": recall_score(y_test, y_pred, average="binary")
+				"recall": recall_score(y_test, y_pred, average="binary"),
+				"loss": 0.0
 			}
-		elif model_type == "pytorch":
-			X = torch.tensor(df[["ema", "rsi", "macd"]].values, dtype=torch.float32)
-			y = torch.tensor(df["result"].values, dtype=torch.long)
+			export_ml_metrics(metrics)
+			return metrics
+
+		elif model_type == "pytorch_mlp":
+			X_train, X_test, y_train, y_test = train_test_split(X.values, y.values, test_size=0.2)
+
+			X_train = torch.tensor(X_train, dtype=torch.float32)
+			y_train = torch.tensor(y_train, dtype=torch.long)
+			X_test = torch.tensor(X_test, dtype=torch.float32)
+			y_test = torch.tensor(y_test, dtype=torch.long)
+
 			model = nn.Sequential(
-				nn.Linear(3, 16),
+				nn.Linear(len(features), 64),
+				nn.BatchNorm1d(64),
 				nn.ReLU(),
-				nn.Linear(16, 2)
+				nn.Dropout(0.3),
+				nn.Linear(64, 32),
+				nn.ReLU(),
+				nn.Linear(32, 2)
 			)
+
 			optimizer = optim.Adam(model.parameters(), lr=0.001)
 			loss_fn = nn.CrossEntropyLoss()
-			for epoch in range(50):
+
+			for epoch in range(100):
 				optimizer.zero_grad()
-				output = model(X)
-				loss = loss_fn(output, y)
+				output = model(X_train)
+				loss = loss_fn(output, y_train)
 				loss.backward()
 				optimizer.step()
+
 			self.model = model
 			with torch.no_grad():
-				preds = model(X).argmax(dim=1)
-				acc = (preds == y).float().mean().item()
-			return {"accuracy": acc, "precision": None, "recall": None}
-		elif model_type == "tensorflow":
-			X = df[["ema", "rsi", "macd"]].values
-			y = df["result"].values
-			model = keras.Sequential([
-				keras.layers.Dense(16, activation="relu", input_shape=(3,)),
-				keras.layers.Dense(2, activation="softmax")
-			])
-			model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
-			history = model.fit(X, y, epochs=50, verbose=0)
-			self.model = model
-			acc = history.history["accuracy"][-1]
-			return {"accuracy": acc, "precision": None, "recall": None}
+				preds = model(X_test).argmax(dim=1).numpy()
+				acc = accuracy_score(y_test, preds)
+				precision = precision_score(y_test, preds, average="binary")
+				recall = recall_score(y_test, preds, average="binary")
+
+			metrics = {"accuracy": acc, "precision": precision, "recall": recall, "loss": loss.item()}
+			export_ml_metrics(metrics)
+			return metrics
+
+		elif model_type == "pytorch_lstm":
+			X_train, X_test, y_train, y_test = train_test_split(X.values, y.values, test_size=0.2)
+
+			X_train = torch.tensor(X_train, dtype=torch.float32)
+			y_train = torch.tensor(y_train, dtype=torch.long)
+			X_test = torch.tensor(X_test, dtype=torch.float32)
+			y_test = torch.tensor(y_test, dtype=torch.long)
+
+			timesteps = 30
+			if len(X_train) >= timesteps and len(X_test) >= timesteps:
+				X_train_seq = X_train.unfold(0, timesteps, 1).permute(0, 2, 1)
+				y_train_seq = y_train[timesteps-1:]
+				X_test_seq = X_test.unfold(0, timesteps, 1).permute(0, 2, 1)
+				y_test_seq = y_test[timesteps-1:]
+
+				class LSTMModel(nn.Module):
+					def __init__(self, input_size=len(features), hidden_size=64, num_layers=2, output_size=2):
+						super().__init__()
+						self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+						self.fc = nn.Linear(hidden_size, output_size)
+
+					def forward(self, x):
+						out, _ = self.lstm(x)
+						out = out[:, -1, :]
+						return self.fc(out)
+
+				model = LSTMModel()
+				optimizer = optim.Adam(model.parameters(), lr=0.001)
+				loss_fn = nn.CrossEntropyLoss()
+
+				for epoch in range(50):
+					optimizer.zero_grad()
+					output = model(X_train_seq)
+					loss = loss_fn(output, y_train_seq)
+					loss.backward()
+					optimizer.step()
+
+				self.model = model
+				with torch.no_grad():
+					preds = model(X_test_seq).argmax(dim=1).numpy()
+					acc = accuracy_score(y_test_seq, preds)
+					precision = precision_score(y_test_seq, preds, average="binary")
+					recall = recall_score(y_test_seq, preds, average="binary")
+
+				metrics = {"accuracy": acc, "precision": precision, "recall": recall, "loss": loss.item()}
+				export_ml_metrics(metrics)
+				return metrics
+			else:
+				raise ValueError("Недостаточно данных для LSTM")
+
+		elif model_type == "tensorflow_gru":
+			X_train, X_test, y_train, y_test = train_test_split(X.values, y.values, test_size=0.2)
+
+			timesteps = 30
+			if len(X_train) >= timesteps and len(X_test) >= timesteps:
+				train_sequences = np.array([X_train[i:i+timesteps] for i in range(len(X_train)-timesteps)])
+				train_labels = y_train[timesteps:]
+				test_sequences = np.array([X_test[i:i+timesteps] for i in range(len(X_test)-timesteps)])
+				test_labels = y_test[timesteps:]
+
+				model = keras.Sequential([
+					keras.layers.GRU(64, return_sequences=True, input_shape=(timesteps, len(features))),
+					keras.layers.Dropout(0.3),
+					keras.layers.GRU(32),
+					keras.layers.Dense(2, activation="softmax")
+				])
+
+				model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+				model.fit(train_sequences, train_labels, epochs=50, verbose=0)
+
+				self.model = model
+				y_pred = model.predict(test_sequences).argmax(axis=1)
+				acc = accuracy_score(test_labels, y_pred)
+				precision = precision_score(test_labels, y_pred, average="binary")
+				recall = recall_score(test_labels, y_pred, average="binary")
+
+				# 🔹 Получаем реальный loss на тесте
+				test_loss, _ = model.evaluate(test_sequences, test_labels, verbose=0)
+
+				metrics = {"accuracy": acc, "precision": precision, "recall": recall, "loss": test_loss}
+				export_ml_metrics(metrics)
+				return metrics
+			else:
+				raise ValueError("Недостаточно данных для GRU")
+
 		else:
 			raise ValueError("Неизвестный тип модели")
 
@@ -223,7 +330,7 @@ class MLService:
 
 		try:
 			self.vector_db.use_collection("news")
-			vector = [float(hash(text) % 1000) / 1000.0] * self.vector_size
+			vector = self.embedding_model.encode(text).tolist()
 			payload = {"id": hash(text), "text": text, "label": result["label"], "score": result["score"]}
 
 			existing = self.vector_db.search_with_filter(vector, {"id": payload["id"]}, top_k=1)

@@ -94,3 +94,40 @@ groups:
         annotations:
           summary: "Очередь индикаторов перегружена"
           description: "Количество задач индикаторов превысило 100."
+
+      # --- Метрики ML ---
+      - alert: LowMLAccuracy
+        expr: ml_training_accuracy < 0.7
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ML Accuracy ниже порога"
+          description: "Точность модели упала ниже 70% за последние 10 минут."
+
+      - alert: LowMLPrecision
+        expr: ml_training_precision < 0.6
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ML Precision низкий"
+          description: "Precision модели упал ниже 60%."
+
+      - alert: LowMLRecall
+        expr: ml_training_recall < 0.6
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ML Recall низкий"
+          description: "Recall модели упал ниже 60%."
+
+      - alert: HighMLLoss
+        expr: ml_training_loss > 0.5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ML Loss слишком высокий"
+          description: "Функция потерь модели превышает 0.5."

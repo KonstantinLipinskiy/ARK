@@ -97,6 +97,16 @@
       },
       {
         "type": "graph",
+        "title": "ML Training Precision",
+        "targets": [{ "expr": "ml_training_precision" }]
+      },
+      {
+        "type": "graph",
+        "title": "ML Training Recall",
+        "targets": [{ "expr": "ml_training_recall" }]
+      },
+      {
+        "type": "graph",
         "title": "ML Training Loss",
         "targets": [{ "expr": "ml_training_loss" }]
       },

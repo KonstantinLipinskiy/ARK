@@ -1,4 +1,3 @@
-# app/utils/metrics.py
 from typing import List, Dict, Union, Optional
 import math
 import asyncio
@@ -105,17 +104,23 @@ async def calculate_metrics_async(trades: List[Union[Dict, object]]) -> Dict:
 # --- ML Training Metrics (Prometheus) ---
 ml_accuracy = Gauge("ml_training_accuracy", "Accuracy of ML training")
 ml_loss = Gauge("ml_training_loss", "Loss of ML training")
+ml_precision = Gauge("ml_training_precision", "Precision of ML training")
+ml_recall = Gauge("ml_training_recall", "Recall of ML training")
 
 def export_ml_metrics(metrics: Dict[str, float]):
 	"""
 	Экспорт метрик обучения ML модели в Prometheus.
-	metrics: словарь с ключами accuracy, loss
+	metrics: словарь с ключами accuracy, loss, precision, recall
 	"""
 	try:
-		if "accuracy" in metrics:
+		if "accuracy" in metrics and metrics["accuracy"] is not None:
 			ml_accuracy.set(metrics["accuracy"])
-		if "loss" in metrics:
+		if "loss" in metrics and metrics["loss"] is not None:
 			ml_loss.set(metrics["loss"])
+		if "precision" in metrics and metrics["precision"] is not None:
+			ml_precision.set(metrics["precision"])
+		if "recall" in metrics and metrics["recall"] is not None:
+			ml_recall.set(metrics["recall"])
 	except Exception as e:
 		print(f"❌ Ошибка экспорта ML метрик: {e}")
 
