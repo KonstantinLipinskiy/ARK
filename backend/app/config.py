@@ -51,6 +51,13 @@ class Settings(BaseSettings):
 	# 🔹 NewsData.io API Key
 	NEWSDATA_API_KEY: str = os.getenv("NEWSDATA_API_KEY", "")
 
+	# 🔹 ML гиперпараметры
+	ML_EPOCHS: int = int(os.getenv("ML_EPOCHS", 50))  # общий параметр
+	ML_HIDDEN_SIZE: int = int(os.getenv("ML_HIDDEN_SIZE", 64))
+	ML_NUM_LAYERS: int = int(os.getenv("ML_NUM_LAYERS", 2))
+	ML_DROPOUT: float = float(os.getenv("ML_DROPOUT", 0.3))
+	ML_LEARNING_RATE: float = float(os.getenv("ML_LEARNING_RATE", 0.001))
+
 
 settings = Settings()
 

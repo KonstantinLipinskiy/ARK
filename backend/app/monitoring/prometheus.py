@@ -12,7 +12,11 @@ from app.utils.metrics import (
 	calculate_metrics_by_strategy,
 	ml_accuracy,
 	ml_loss,
+	ml_epoch_loss,
+	ml_training_time,
+	ml_learning_rate,
 )
+
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
 from app.db.vector import (

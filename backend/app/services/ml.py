@@ -11,6 +11,7 @@ from tensorflow import keras
 from transformers import pipeline
 import numpy as np
 from sentence_transformers import SentenceTransformer
+import time
 from app.db.vector import VectorDB
 from app.utils.logger import logger
 from app.config import settings
@@ -139,7 +140,15 @@ class MLService:
 
 	# --- ОБУЧЕНИЕ ---
 
-	def train(self, df: pd.DataFrame, model_type: str = "sklearn") -> dict:
+	def train(self, 
+		df: pd.DataFrame, 
+		model_type: str = "sklearn", 
+		epochs: int = settings.ML_EPOCHS, 
+		learning_rate: float = settings.ML_LEARNING_RATE, 
+		dropout: float = settings.ML_DROPOUT, 
+		hidden_size: int = settings.ML_HIDDEN_SIZE, 
+		num_layers: int = settings.ML_NUM_LAYERS) -> dict:
+
 		# --- общий набор признаков ---
 		features = ["ema", "rsi", "macd", "hour", "atr",
 					"bollinger_upper", "bollinger_lower", "bollinger",
@@ -152,47 +161,50 @@ class MLService:
 
 		if model_type == "sklearn":
 			X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-
 			self.model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
 			self.model.fit(X_train, y_train)
 			y_pred = self.model.predict(X_test)
-
 			metrics = {
 				"accuracy": accuracy_score(y_test, y_pred),
 				"precision": precision_score(y_test, y_pred, average="binary"),
 				"recall": recall_score(y_test, y_pred, average="binary"),
 				"loss": 0.0
 			}
-			export_ml_metrics(metrics)
+			export_ml_metrics(metrics, training_time=0, learning_rate=None)
 			return metrics
 
 		elif model_type == "pytorch_mlp":
 			X_train, X_test, y_train, y_test = train_test_split(X.values, y.values, test_size=0.2)
-
 			X_train = torch.tensor(X_train, dtype=torch.float32)
 			y_train = torch.tensor(y_train, dtype=torch.long)
 			X_test = torch.tensor(X_test, dtype=torch.float32)
 			y_test = torch.tensor(y_test, dtype=torch.long)
 
 			model = nn.Sequential(
-				nn.Linear(len(features), 64),
-				nn.BatchNorm1d(64),
+				nn.Linear(len(features), hidden_size),
+				nn.BatchNorm1d(hidden_size),
 				nn.ReLU(),
-				nn.Dropout(0.3),
-				nn.Linear(64, 32),
+				nn.Dropout(dropout),
+				nn.Linear(hidden_size, hidden_size // 2),
 				nn.ReLU(),
-				nn.Linear(32, 2)
+				nn.Linear(hidden_size // 2, 2)
 			)
 
-			optimizer = optim.Adam(model.parameters(), lr=0.001)
+			optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 			loss_fn = nn.CrossEntropyLoss()
 
-			for epoch in range(100):
+			epoch_losses = []
+			start_time = time.time()
+
+			for epoch in range(epochs):
 				optimizer.zero_grad()
 				output = model(X_train)
 				loss = loss_fn(output, y_train)
 				loss.backward()
 				optimizer.step()
+				epoch_losses.append(loss.item())
+
+			training_time = time.time() - start_time
 
 			self.model = model
 			with torch.no_grad():
@@ -202,12 +214,11 @@ class MLService:
 				recall = recall_score(y_test, preds, average="binary")
 
 			metrics = {"accuracy": acc, "precision": precision, "recall": recall, "loss": loss.item()}
-			export_ml_metrics(metrics)
+			export_ml_metrics(metrics, epoch_losses=epoch_losses, training_time=training_time, learning_rate=learning_rate)
 			return metrics
 
 		elif model_type == "pytorch_lstm":
 			X_train, X_test, y_train, y_test = train_test_split(X.values, y.values, test_size=0.2)
-
 			X_train = torch.tensor(X_train, dtype=torch.float32)
 			y_train = torch.tensor(y_train, dtype=torch.long)
 			X_test = torch.tensor(X_test, dtype=torch.float32)
@@ -221,7 +232,7 @@ class MLService:
 				y_test_seq = y_test[timesteps-1:]
 
 				class LSTMModel(nn.Module):
-					def __init__(self, input_size=len(features), hidden_size=64, num_layers=2, output_size=2):
+					def __init__(self, input_size=len(features), hidden_size=hidden_size, num_layers=num_layers, output_size=2):
 						super().__init__()
 						self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
 						self.fc = nn.Linear(hidden_size, output_size)
@@ -232,15 +243,21 @@ class MLService:
 						return self.fc(out)
 
 				model = LSTMModel()
-				optimizer = optim.Adam(model.parameters(), lr=0.001)
+				optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 				loss_fn = nn.CrossEntropyLoss()
 
-				for epoch in range(50):
+				epoch_losses = []
+				start_time = time.time()
+
+				for epoch in range(epochs):
 					optimizer.zero_grad()
 					output = model(X_train_seq)
 					loss = loss_fn(output, y_train_seq)
 					loss.backward()
 					optimizer.step()
+					epoch_losses.append(loss.item())
+
+				training_time = time.time() - start_time
 
 				self.model = model
 				with torch.no_grad():
@@ -250,14 +267,13 @@ class MLService:
 					recall = recall_score(y_test_seq, preds, average="binary")
 
 				metrics = {"accuracy": acc, "precision": precision, "recall": recall, "loss": loss.item()}
-				export_ml_metrics(metrics)
+				export_ml_metrics(metrics, epoch_losses=epoch_losses, training_time=training_time, learning_rate=learning_rate)
 				return metrics
 			else:
 				raise ValueError("Недостаточно данных для LSTM")
 
 		elif model_type == "tensorflow_gru":
 			X_train, X_test, y_train, y_test = train_test_split(X.values, y.values, test_size=0.2)
-
 			timesteps = 30
 			if len(X_train) >= timesteps and len(X_test) >= timesteps:
 				train_sequences = np.array([X_train[i:i+timesteps] for i in range(len(X_train)-timesteps)])
@@ -266,14 +282,18 @@ class MLService:
 				test_labels = y_test[timesteps:]
 
 				model = keras.Sequential([
-					keras.layers.GRU(64, return_sequences=True, input_shape=(timesteps, len(features))),
-					keras.layers.Dropout(0.3),
-					keras.layers.GRU(32),
+					keras.layers.GRU(hidden_size, return_sequences=True, input_shape=(timesteps, len(features))),
+					keras.layers.Dropout(dropout),
+					keras.layers.GRU(hidden_size // 2),
 					keras.layers.Dense(2, activation="softmax")
 				])
 
-				model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
-				model.fit(train_sequences, train_labels, epochs=50, verbose=0)
+				model.compile(optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
+							loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+
+				start_time = time.time()
+				history = model.fit(train_sequences, train_labels, epochs=epochs, verbose=0)
+				training_time = time.time() - start_time
 
 				self.model = model
 				y_pred = model.predict(test_sequences).argmax(axis=1)
@@ -281,17 +301,18 @@ class MLService:
 				precision = precision_score(test_labels, y_pred, average="binary")
 				recall = recall_score(test_labels, y_pred, average="binary")
 
-				# 🔹 Получаем реальный loss на тесте
 				test_loss, _ = model.evaluate(test_sequences, test_labels, verbose=0)
 
 				metrics = {"accuracy": acc, "precision": precision, "recall": recall, "loss": test_loss}
-				export_ml_metrics(metrics)
+				export_ml_metrics(metrics, epoch_losses=history.history["loss"], training_time=training_time, learning_rate=learning_rate)
 				return metrics
 			else:
 				raise ValueError("Недостаточно данных для GRU")
 
 		else:
 			raise ValueError("Неизвестный тип модели")
+
+
 
 	# --- ПРЕДСКАЗАНИЯ ---
 	def predict_signal(self, features: dict) -> float:
@@ -360,18 +381,43 @@ class MLService:
 	def load_model(self, path: str, model_type: str):
 		if model_type == "sklearn":
 			self.model = joblib.load(path)
-		elif model_type == "pytorch":
+
+		elif model_type == "pytorch_mlp":
+			# Архитектура должна совпадать с train()
 			model = nn.Sequential(
-				nn.Linear(3, 16),
+				nn.Linear(19, 64),       # входной слой под 19 признаков
+				nn.BatchNorm1d(64),
 				nn.ReLU(),
-				nn.Linear(16, 2)
+				nn.Dropout(0.3),
+				nn.Linear(64, 32),
+				nn.ReLU(),
+				nn.Linear(32, 2)
 			)
 			model.load_state_dict(torch.load(path))
 			self.model = model
-		elif model_type == "tensorflow":
+
+		elif model_type == "pytorch_lstm":
+			class LSTMModel(nn.Module):
+				def __init__(self, input_size=19, hidden_size=64, num_layers=2, output_size=2):
+					super().__init__()
+					self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+					self.fc = nn.Linear(hidden_size, output_size)
+
+				def forward(self, x):
+					out, _ = self.lstm(x)
+					out = out[:, -1, :]
+					return self.fc(out)
+
+			model = LSTMModel()
+			model.load_state_dict(torch.load(path))
+			self.model = model
+
+		elif model_type == "tensorflow_gru":
 			self.model = keras.models.load_model(path)
+
 		else:
 			raise ValueError("Неизвестный тип модели")
+
 
 	# --- СОХРАНЕНИЕ ЭМБЕДДИНГА СИГНАЛА ---
 	def save_signal_embedding(self, features: dict, signal_id: int):

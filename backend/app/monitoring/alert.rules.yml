@@ -131,3 +131,21 @@ groups:
         annotations:
           summary: "ML Loss слишком высокий"
           description: "Функция потерь модели превышает 0.5."
+
+      - alert: LongMLTrainingTime
+        expr: ml_training_time_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ML Training слишком долго"
+          description: "Время обучения превысило 10 минут."
+
+      - alert: AbnormalLearningRate
+        expr: ml_training_learning_rate > 0.1 or ml_training_learning_rate < 0.0001
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "Learning Rate вне диапазона"
+          description: "LR слишком маленький или слишком большой."

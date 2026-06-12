@@ -107,23 +107,6 @@ ml_loss = Gauge("ml_training_loss", "Loss of ML training")
 ml_precision = Gauge("ml_training_precision", "Precision of ML training")
 ml_recall = Gauge("ml_training_recall", "Recall of ML training")
 
-def export_ml_metrics(metrics: Dict[str, float]):
-	"""
-	Экспорт метрик обучения ML модели в Prometheus.
-	metrics: словарь с ключами accuracy, loss, precision, recall
-	"""
-	try:
-		if "accuracy" in metrics and metrics["accuracy"] is not None:
-			ml_accuracy.set(metrics["accuracy"])
-		if "loss" in metrics and metrics["loss"] is not None:
-			ml_loss.set(metrics["loss"])
-		if "precision" in metrics and metrics["precision"] is not None:
-			ml_precision.set(metrics["precision"])
-		if "recall" in metrics and metrics["recall"] is not None:
-			ml_recall.set(metrics["recall"])
-	except Exception as e:
-		print(f"❌ Ошибка экспорта ML метрик: {e}")
-
 # --- Agent Metrics (Prometheus) ---
 AGENT_REQUESTS = Counter("agent_requests_total", "Количество запросов к агентам")
 AGENT_ERRORS = Counter("agent_errors_total", "Количество ошибок агентов")
@@ -144,3 +127,36 @@ def export_report_metrics(search_accuracy: float, latency: float):
 		REPORT_LATENCY_HISTOGRAM.observe(latency)
 	except Exception as e:
 		print(f"❌ Ошибка экспорта метрик отчётов: {e}")
+
+# --- ML Training Extended Metrics ---
+ml_epoch_loss = Histogram("ml_training_epoch_loss", "Loss per epoch during ML training")
+ml_training_time = Gauge("ml_training_time_seconds", "Total training time in seconds")
+ml_learning_rate = Gauge("ml_training_learning_rate", "Learning rate used in training")
+
+def export_ml_metrics(metrics: Dict[str, float], epoch_losses: Optional[List[float]] = None, training_time: Optional[float] = None, learning_rate: Optional[float] = None):
+	"""
+	Экспорт метрик обучения ML модели в Prometheus.
+	metrics: словарь с ключами accuracy, loss, precision, recall
+	epoch_losses: список значений loss по эпохам
+	training_time: общее время обучения в секундах
+	learning_rate: использованный learning rate
+	"""
+	try:
+		if "accuracy" in metrics and metrics["accuracy"] is not None:
+			ml_accuracy.set(metrics["accuracy"])
+		if "loss" in metrics and metrics["loss"] is not None:
+			ml_loss.set(metrics["loss"])
+		if "precision" in metrics and metrics["precision"] is not None:
+			ml_precision.set(metrics["precision"])
+		if "recall" in metrics and metrics["recall"] is not None:
+			ml_recall.set(metrics["recall"])
+
+		if epoch_losses:
+			for l in epoch_losses:
+				ml_epoch_loss.observe(l)
+		if training_time is not None:
+			ml_training_time.set(training_time)
+		if learning_rate is not None:
+			ml_learning_rate.set(learning_rate)
+	except Exception as e:
+		print(f"❌ Ошибка экспорта ML метрик: {e}")

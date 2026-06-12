@@ -112,6 +112,21 @@
       },
       {
         "type": "graph",
+        "title": "ML Training Loss per Epoch",
+        "targets": [{ "expr": "ml_training_epoch_loss" }]
+      },
+      {
+        "type": "gauge",
+        "title": "ML Training Time (s)",
+        "targets": [{ "expr": "ml_training_time_seconds" }]
+      },
+      {
+        "type": "gauge",
+        "title": "ML Training Learning Rate",
+        "targets": [{ "expr": "ml_training_learning_rate" }]
+      },
+      {
+        "type": "graph",
         "title": "RabbitMQ Messages Published",
         "targets": [{ "expr": "rabbitmq_messages_published_total" }]
       },
