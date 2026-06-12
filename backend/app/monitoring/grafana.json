@@ -127,6 +127,41 @@
       },
       {
         "type": "graph",
+        "title": "ML CV Accuracy",
+        "targets": [{ "expr": "ml_cv_accuracy" }]
+      },
+      {
+        "type": "graph",
+        "title": "ML CV Precision",
+        "targets": [{ "expr": "ml_cv_precision" }]
+      },
+      {
+        "type": "graph",
+        "title": "ML CV Recall",
+        "targets": [{ "expr": "ml_cv_recall" }]
+      },
+      {
+        "type": "graph",
+        "title": "ML CV Loss",
+        "targets": [{ "expr": "ml_cv_loss" }]
+      },
+      {
+        "type": "graph",
+        "title": "ML Training Runs",
+        "targets": [{ "expr": "ml_training_runs_total" }]
+      },
+      {
+        "type": "graph",
+        "title": "ML Predictions Total",
+        "targets": [{ "expr": "ml_predictions_total" }]
+      },
+      {
+        "type": "heatmap",
+        "title": "ML Prediction Confidence Distribution",
+        "targets": [{ "expr": "ml_prediction_confidence" }]
+      },
+      {
+        "type": "graph",
         "title": "RabbitMQ Messages Published",
         "targets": [{ "expr": "rabbitmq_messages_published_total" }]
       },

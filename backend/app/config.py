@@ -58,6 +58,19 @@ class Settings(BaseSettings):
 	ML_DROPOUT: float = float(os.getenv("ML_DROPOUT", 0.3))
 	ML_LEARNING_RATE: float = float(os.getenv("ML_LEARNING_RATE", 0.001))
 
+	# app/config/settings.py
+
+	# --- ML Hyperparameters ---
+	ML_EPOCHS = int(os.getenv("ML_EPOCHS", 100))
+	ML_LEARNING_RATE = float(os.getenv("ML_LEARNING_RATE", 0.0007))
+	ML_DROPOUT = float(os.getenv("ML_DROPOUT", 0.4))
+	ML_HIDDEN_SIZE = int(os.getenv("ML_HIDDEN_SIZE", 128))
+	ML_NUM_LAYERS = int(os.getenv("ML_NUM_LAYERS", 3))
+
+	# --- Cross Validation ---
+	ML_USE_CV = os.getenv("ML_USE_CV", "True").lower() in ("true", "1", "yes")
+	ML_CV_SPLITS = int(os.getenv("ML_CV_SPLITS", 5))
+
 
 settings = Settings()
 

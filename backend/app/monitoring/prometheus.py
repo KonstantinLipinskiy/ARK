@@ -15,7 +15,15 @@ from app.utils.metrics import (
 	ml_epoch_loss,
 	ml_training_time,
 	ml_learning_rate,
-)
+	ml_cv_accuracy,
+	ml_cv_precision,
+	ml_cv_recall,
+	ml_cv_loss,
+	ml_training_runs_total,      # ✅ количество запусков обучения
+	ml_predictions_total,        # ✅ количество предсказаний
+	ml_prediction_confidence     # ✅ распределение confidence score
+	)
+
 
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache

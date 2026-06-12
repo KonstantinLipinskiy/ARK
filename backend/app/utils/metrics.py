@@ -2,6 +2,7 @@ from typing import List, Dict, Union, Optional
 import math
 import asyncio
 from prometheus_client import Gauge, Counter, Histogram
+import numpy as np
 
 # --- Trading Metrics ---
 def _extract_profit(trade: Union[Dict, object]) -> float:
@@ -160,3 +161,83 @@ def export_ml_metrics(metrics: Dict[str, float], epoch_losses: Optional[List[flo
 			ml_learning_rate.set(learning_rate)
 	except Exception as e:
 		print(f"❌ Ошибка экспорта ML метрик: {e}")
+
+# --- ML Cross-Validation Metrics (Prometheus) ---
+ml_cv_accuracy = Gauge("ml_cv_accuracy", "Average accuracy across CV folds")
+ml_cv_precision = Gauge("ml_cv_precision", "Average precision across CV folds")
+ml_cv_recall = Gauge("ml_cv_recall", "Average recall across CV folds")
+ml_cv_loss = Gauge("ml_cv_loss", "Average loss across CV folds")
+
+def aggregate_cv_metrics(list_of_metrics: List[Dict[str, float]]) -> Dict[str, float]:
+	"""
+	Усреднение метрик accuracy, precision, recall, loss по фолдам.
+	list_of_metrics: список словарей вида {"accuracy": ..., "precision": ..., "recall": ..., "loss": ...}
+	"""
+	if not list_of_metrics:
+		return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "loss": 0.0}
+
+	acc = [m.get("accuracy", 0.0) for m in list_of_metrics]
+	prec = [m.get("precision", 0.0) for m in list_of_metrics]
+	rec = [m.get("recall", 0.0) for m in list_of_metrics]
+	loss = [m.get("loss", 0.0) for m in list_of_metrics]
+
+	return {
+		"accuracy": float(np.mean(acc)),
+		"precision": float(np.mean(prec)),
+		"recall": float(np.mean(rec)),
+		"loss": float(np.mean(loss))
+	}
+
+def export_cv_metrics(metrics: Dict[str, float]):
+	"""
+	Экспорт усреднённых метрик кросс-валидации в Prometheus.
+	"""
+	try:
+		if "accuracy" in metrics and metrics["accuracy"] is not None:
+			ml_cv_accuracy.set(metrics["accuracy"])
+		if "precision" in metrics and metrics["precision"] is not None:
+			ml_cv_precision.set(metrics["precision"])
+		if "recall" in metrics and metrics["recall"] is not None:
+			ml_cv_recall.set(metrics["recall"])
+		if "loss" in metrics and metrics["loss"] is not None:
+			ml_cv_loss.set(metrics["loss"])
+	except Exception as e:
+		print(f"❌ Ошибка экспорта CV метрик: {e}")
+
+
+# --- Auto Logging Metrics (Prometheus) ---
+ml_training_runs_total = Counter("ml_training_runs_total", "Количество запусков обучения ML моделей")
+ml_predictions_total = Counter("ml_predictions_total", "Количество предсказаний ML моделей")
+ml_prediction_confidence = Histogram("ml_prediction_confidence", "Распределение confidence score предсказаний")
+
+def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[float]] = None,
+						training_time: Optional[float] = None, learning_rate: Optional[float] = None):
+	"""
+	Логирование запуска обучения модели.
+	"""
+	try:
+		ml_training_runs_total.inc()
+		# Дополнительно можно логировать ключевые метрики
+		if "accuracy" in metrics and metrics["accuracy"] is not None:
+			ml_accuracy.set(metrics["accuracy"])
+		if "loss" in metrics and metrics["loss"] is not None:
+			ml_loss.set(metrics["loss"])
+		if training_time is not None:
+			ml_training_time.set(training_time)
+		if learning_rate is not None:
+			ml_learning_rate.set(learning_rate)
+	except Exception as e:
+		print(f"❌ Ошибка логирования обучения: {e}")
+
+def log_prediction(features: Dict[str, float], result: Dict[str, float], confidence: float):
+	"""
+	Логирование предсказания модели.
+	features: входные признаки
+	result: словарь с результатами предсказания (например, success_probability)
+	confidence: confidence score
+	"""
+	try:
+		ml_predictions_total.inc()
+		ml_prediction_confidence.observe(confidence)
+	except Exception as e:
+		print(f"❌ Ошибка логирования предсказания: {e}")
