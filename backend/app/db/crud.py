@@ -1,3 +1,4 @@
+#app/db/crud.py
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -784,4 +785,70 @@ async def delete_old_news(db: AsyncSession, days: int = 30):
 	except SQLAlchemyError as e:
 		await db.rollback()
 		logger.error(f"Ошибка удаления старых новостей: {e}")
+		raise
+
+
+# ---------- ML Models ----------
+async def create_ml_model(db: AsyncSession, model_data: dict) -> schemas.MLModelORM:
+	"""Создать запись ML модели в БД."""
+	try:
+		ml_model = schemas.MLModelORM(**model_data)
+		db.add(ml_model)
+		await db.commit()
+		await db.refresh(ml_model)
+		return ml_model
+	except IntegrityError as e:
+		await db.rollback()
+		logger.error(f"Ошибка уникальности при создании ML модели: {e}")
+		raise
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка БД при создании ML модели: {e}")
+		raise
+
+async def get_ml_model_by_name(db: AsyncSession, name: str) -> schemas.MLModelORM | None:
+	"""Получить ML модель по имени."""
+	result = await db.execute(select(schemas.MLModelORM).filter(schemas.MLModelORM.name == name))
+	return result.scalars().first()
+
+async def list_ml_models(db: AsyncSession, skip: int = 0, limit: int = 100):
+	"""Список всех ML моделей с пагинацией."""
+	query = select(schemas.MLModelORM).offset(skip).limit(limit)
+	result = await db.execute(query)
+	return result.scalars().all()
+
+async def update_ml_model(db: AsyncSession, model_id: int, updates: dict) -> schemas.MLModelORM | None:
+	"""Обновить ML модель по ID."""
+	result = await db.execute(select(schemas.MLModelORM).filter(schemas.MLModelORM.id == model_id))
+	ml_model = result.scalars().first()
+	if not ml_model:
+		return None
+
+	allowed_fields = {"name", "type", "path", "params"}
+	for key, value in updates.items():
+		if key in allowed_fields and value is not None:
+			setattr(ml_model, key, value)
+
+	try:
+		await db.commit()
+		await db.refresh(ml_model)
+		return ml_model
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка обновления ML модели: {e}")
+		raise
+
+async def delete_ml_model(db: AsyncSession, model_id: int) -> bool:
+	"""Удалить ML модель по ID."""
+	result = await db.execute(select(schemas.MLModelORM).filter(schemas.MLModelORM.id == model_id))
+	ml_model = result.scalars().first()
+	if not ml_model:
+		return False
+	await db.delete(ml_model)
+	try:
+		await db.commit()
+		return True
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка удаления ML модели: {e}")
 		raise

@@ -22,22 +22,22 @@ class TelegramHandler(logging.Handler):
 			log_entry = self.format(record)
 			telegram_id = os.getenv("ADMIN_TELEGRAM_ID", "")
 			if telegram_id:
-					import asyncio
-					loop = asyncio.get_event_loop()
-					if loop.is_running():
-						asyncio.create_task(
-							telegram_service.send_message_by_id(
-									telegram_id=telegram_id,
-									text=f"❌ CRITICAL ERROR: {log_entry}"
-							)
+				import asyncio
+				loop = asyncio.get_event_loop()
+				if loop.is_running():
+					asyncio.create_task(
+						telegram_service.send_message_by_id(
+							telegram_id=telegram_id,
+							text=f"❌ CRITICAL ERROR: {log_entry}"
 						)
-					else:
-						loop.run_until_complete(
-							telegram_service.send_message_by_id(
-									telegram_id=telegram_id,
-									text=f"❌ CRITICAL ERROR: {log_entry}"
-							)
+					)
+				else:
+					loop.run_until_complete(
+						telegram_service.send_message_by_id(
+							telegram_id=telegram_id,
+							text=f"❌ CRITICAL ERROR: {log_entry}"
 						)
+					)
 		except Exception as e:
 			logging.error(f"Failed to send Telegram alert: {e}")
 
@@ -64,7 +64,7 @@ def setup_logger():
 	"""
 	Настройка логирования:
 	- Ротация логов (ежедневно)
-	- Разделение логов (общие, ошибки, сделки, Qdrant)
+	- Разделение логов (общие, ошибки, сделки, Qdrant, ML)
 	- Расширенный формат (user_id, symbol, trade_id)
 	- Отправка CRITICAL ошибок в Telegram
 	"""
@@ -101,6 +101,13 @@ def setup_logger():
 	qdrant_handler.setFormatter(JSONFormatter())
 	qdrant_handler.setLevel(logging.ERROR)
 
+	# Лог ML моделей
+	ml_handler = TimedRotatingFileHandler(
+		os.path.join(LOG_DIR, "ml.log"), when="midnight", backupCount=7, encoding="utf-8"
+	)
+	ml_handler.setFormatter(formatter)
+	ml_handler.setLevel(logging.INFO)
+
 	# Telegram handler для CRITICAL ошибок
 	telegram_handler = TelegramHandler()
 	telegram_handler.setFormatter(formatter)
@@ -112,6 +119,7 @@ def setup_logger():
 	logger.addHandler(error_handler)
 	logger.addHandler(trades_handler)
 	logger.addHandler(qdrant_handler)
+	logger.addHandler(ml_handler)
 	logger.addHandler(telegram_handler)
 
 	return logger
@@ -136,3 +144,15 @@ async def log_critical_error(message: str, **kwargs):
 		)
 	except Exception as e:
 		logger.error(f"Failed to send Telegram alert: {e}")
+
+# -------------------------------------------------------------------
+# Логирование загрузки ML модели
+# -------------------------------------------------------------------
+def log_model_load(model_type: str, path: str, params: dict):
+	"""
+	Логирование информации о загруженной ML модели.
+	"""
+	logger.info(
+		f"ML модель загружена: type={model_type}, path={path}, params={params}",
+		extra={"operation": "load_model", "collection": "ml_models"}
+	)

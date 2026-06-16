@@ -1,3 +1,4 @@
+# app/services/backtest.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,7 +19,8 @@ from app.models.trade import Trade
 
 # --- ML Service ---
 ml_service = MLService()
-ml_service.load_model("models/sklearn_model.pkl", model_type="sklearn")
+ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
+
 
 broker = RabbitMQBroker()
 asyncio.create_task(broker.connect())

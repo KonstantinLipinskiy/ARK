@@ -119,7 +119,7 @@ class UserORM(Base):
 	signals = relationship("SignalORM", back_populates="user", cascade="all, delete-orphan")
 	backtest_reports = relationship("BacktestReport", back_populates="user", cascade="all, delete-orphan")
 	backtest_trades = relationship("BacktestTradeORM", back_populates="user", cascade="all, delete-orphan")
-
+	ml_models = relationship("MLModelORM", back_populates="user", cascade="all, delete-orphan")
 	refresh_tokens = relationship("RefreshTokenORM", back_populates="user", cascade="all, delete-orphan")
 
 class RiskLog(Base):
@@ -268,3 +268,18 @@ class NewsORM(Base):
 	source = Column(String(100), nullable=True)               # источник (NewsData.io, CoinDesk)
 	published_at = Column(DateTime, nullable=False)           # время публикации
 	created_at = Column(DateTime, server_default=func.now())  # время сохранения в БД
+
+class MLModelORM(Base):
+	__tablename__ = "ml_models"
+
+	id = Column(Integer, primary_key=True, index=True)
+	name = Column(String(50), nullable=False, unique=True, index=True)   # имя модели (например, "default_sklearn")
+	type = Column(String(20), nullable=False)                            # sklearn / pytorch_mlp / pytorch_lstm / tensorflow_gru
+	path = Column(String(255), nullable=False)                           # путь к файлу модели
+	params = Column(JSON, nullable=True)                                 # гиперпараметры (hidden_size, dropout, num_layers, lr, epochs)
+	created_at = Column(DateTime, server_default=func.now())             # когда добавлена
+	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+	# связь с пользователем (если хотим хранить кастомные модели для конкретного юзера)
+	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	user = relationship("UserORM", back_populates="ml_models")

@@ -1,3 +1,4 @@
+#app/config.py
 import os
 from dotenv import load_dotenv
 from typing import ClassVar
@@ -70,6 +71,16 @@ class Settings(BaseSettings):
 	# --- Cross Validation ---
 	ML_USE_CV = os.getenv("ML_USE_CV", "True").lower() in ("true", "1", "yes")
 	ML_CV_SPLITS = int(os.getenv("ML_CV_SPLITS", 5))
+
+	MODEL_TYPE = "sklearn"   # варианты: sklearn, pytorch_mlp, pytorch_lstm, tensorflow_gru
+	MODEL_PATH = "models/sklearn_model.pkl"
+	MODEL_PARAMS = {
+		"learning_rate": 0.001,
+		"epochs": 50,
+		"dropout": 0.3,
+		"hidden_size": 64
+	}
+
 
 
 settings = Settings()

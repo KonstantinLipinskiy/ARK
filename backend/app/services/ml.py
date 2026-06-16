@@ -14,12 +14,14 @@ from sentence_transformers import SentenceTransformer
 from sklearn.model_selection import StratifiedKFold
 import time
 from app.db.vector import VectorDB
-from app.utils.logger import logger
+from app.utils.logger import logger, log_model_load
 from app.config import settings
 from app.services.exchange import get_ticker, get_order_book, get_mark_price
 from app.services.news_loader import NewsLoader
 from sklearn.model_selection import train_test_split
 from app.utils.metrics import export_ml_metrics, aggregate_cv_metrics, export_cv_metrics
+from app.db import crud
+from app.db.session import get_session
 
 
 class MLService:
@@ -133,10 +135,6 @@ class MLService:
 			# Liquidity ratio
 			df["bid_ask_ratio"] = df["bid"] / df["ask"]
 
-		# Корреляция с BTC/ETH можно добавить при наличии внешних данных:
-		# Например, если есть btc_df и eth_df с колонкой "close":
-		# df["corr_btc"] = df["close"].rolling(window=30).corr(btc_df["close"])
-		# df["corr_eth"] = df["close"].rolling(window=30).corr(eth_df["close"])
 
 		return df
 
@@ -637,12 +635,14 @@ class MLService:
 		else:
 			raise TypeError("Неизвестный тип модели")
 
+	
+
 	def load_model(self, path: str, model_type: str):
 		if model_type == "sklearn":
 			self.model = joblib.load(path)
 
 		elif model_type == "pytorch_mlp":
-			# Архитектура должна совпадать с train()
+			params = settings.MODEL_PARAMS
 			input_size = len([
 				"ema", "rsi", "macd", "hour", "atr",
 				"bollinger_upper", "bollinger_lower", "bollinger",
@@ -651,19 +651,23 @@ class MLService:
 				"last_price", "spread", "liquidity_imbalance", "mark_price",
 				"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"
 			])
+			hidden_size = params.get("hidden_size", 64)
+			dropout = params.get("dropout", 0.3)
+
 			model = nn.Sequential(
-				nn.Linear(input_size, 64),
-				nn.BatchNorm1d(64),
+				nn.Linear(input_size, hidden_size),
+				nn.BatchNorm1d(hidden_size),
 				nn.ReLU(),
-				nn.Dropout(0.3),
-				nn.Linear(64, 32),
+				nn.Dropout(dropout),
+				nn.Linear(hidden_size, hidden_size // 2),
 				nn.ReLU(),
-				nn.Linear(32, 2)
+				nn.Linear(hidden_size // 2, 2)
 			)
 			model.load_state_dict(torch.load(path))
 			self.model = model
 
 		elif model_type == "pytorch_lstm":
+			params = settings.MODEL_PARAMS
 			input_size = len([
 				"ema", "rsi", "macd", "hour", "atr",
 				"bollinger_upper", "bollinger_lower", "bollinger",
@@ -672,8 +676,11 @@ class MLService:
 				"last_price", "spread", "liquidity_imbalance", "mark_price",
 				"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"
 			])
+			hidden_size = params.get("hidden_size", 64)
+			num_layers = params.get("num_layers", 2)
+
 			class LSTMModel(nn.Module):
-				def __init__(self, input_size=input_size, hidden_size=64, num_layers=2, output_size=2):
+				def __init__(self, input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, output_size=2):
 					super().__init__()
 					self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
 					self.fc = nn.Linear(hidden_size, output_size)
@@ -692,6 +699,33 @@ class MLService:
 
 		else:
 			raise ValueError("Неизвестный тип модели")
+
+		# Логирование загрузки
+		log_model_load(model_type, path, settings.MODEL_PARAMS)
+
+
+	async def load_model_from_db(self, name: str):
+		"""Загрузить ML модель по имени из таблицы ml_models."""
+		async with get_session() as session:
+			ml_model = await crud.get_ml_model_by_name(session, name)
+			if not ml_model:
+				raise ValueError(f"Модель '{name}' не найдена в БД")
+
+			# читаем параметры
+			model_type = ml_model.type
+			path = ml_model.path
+			params = ml_model.params or {}
+
+			# загружаем модель
+			self.load_model(path=path, model_type=model_type)
+
+			# Логирование загрузки из БД
+			log_model_load(model_type, path, params)
+
+			return ml_model
+
+
+
 
 
 	# --- СОХРАНЕНИЕ ЭМБЕДДИНГА СИГНАЛА ---
