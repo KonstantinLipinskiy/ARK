@@ -1,4 +1,3 @@
-# app/services/backtest.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -96,7 +95,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 		data["stoch_d"] = pd.Series(data["stoch_k"]).rolling(window=3).mean()
 
 	if "Volume" in strategy["enabled_indicators"]:
-		data["vol_sma"] = pd.Series(data["volume"]).rolling(window=20).mean()
+		data["vol_sma"] = pd.Series(data["volume"]).rolling(window=strategy.get("volume_period", 20)).mean()
 
 	# --- Основной цикл по свечам ---
 	for i in range(1, len(data)):
@@ -122,9 +121,11 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 							signals.append(False)
 
 					elif ind == "RSI":
-						if row["rsi"] < 30:
+						rsi_lower = strategy.get("rsi_lower_threshold", 30)
+						rsi_upper = strategy.get("rsi_upper_threshold", 70)
+						if row["rsi"] < rsi_lower:
 							signals.append(True); direction = "long"
-						elif row["rsi"] > 70 and market_type == "futures":
+						elif row["rsi"] > rsi_upper and market_type == "futures":
 							signals.append(True); direction = "short"
 						else:
 							signals.append(False)
@@ -146,17 +147,21 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 							signals.append(False)
 
 					elif ind == "Stochastic":
-						if row["stoch_k"] < 20 and row["stoch_k"] > row["stoch_d"]:
+						stoch_lower = strategy.get("stochastic_lower_threshold", 20)
+						stoch_upper = strategy.get("stochastic_upper_threshold", 80)
+						if row["stoch_k"] < stoch_lower and row["stoch_k"] > row["stoch_d"]:
 							signals.append(True); direction = "long"
-						elif row["stoch_k"] > 80 and row["stoch_k"] < row["stoch_d"] and market_type == "futures":
+						elif row["stoch_k"] > stoch_upper and row["stoch_k"] < row["stoch_d"] and market_type == "futures":
 							signals.append(True); direction = "short"
 						else:
 							signals.append(False)
 
 				# --- Фильтр по sentiment ---
-				if row.get("news_sentiment", 0) < -0.5 and direction == "long":
+				sentiment_long = strategy.get("sentiment_long_threshold", -0.5)
+				sentiment_short = strategy.get("sentiment_short_threshold", 0.5)
+				if row.get("news_sentiment", 0) < sentiment_long and direction == "long":
 					signals.append(False)
-				if row.get("news_sentiment", 0) > 0.5 and direction == "short":
+				if row.get("news_sentiment", 0) > sentiment_short and direction == "short":
 					signals.append(False)
 
 				if all(signals):
@@ -211,7 +216,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
-					dynamic_stop = position["entry"] - settings.ATR_MULTIPLIER * atr_value
+					dynamic_stop = position["entry"] - strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price <= dynamic_stop:
 						position["exit"] = price; position["status"] = "atr_stop"
 						trades.append(position); position = None
@@ -227,7 +232,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
-					dynamic_stop = position["entry"] + settings.ATR_MULTIPLIER * atr_value
+					dynamic_stop = position["entry"] + strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price >= dynamic_stop:
 						position["exit"] = price; position["status"] = "atr_stop"
 						trades.append(position); position = None
@@ -344,7 +349,6 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: st
 	plt.legend()
 	plt.show()
 
-
 # --- Пример запуска ---
 if __name__ == "__main__":
 	loop = asyncio.get_event_loop()
@@ -402,4 +406,3 @@ if __name__ == "__main__":
 			sheet_name = key.replace("/", "_")[:30]
 			df_trades.to_excel(writer, sheet_name=sheet_name)
 	print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
-

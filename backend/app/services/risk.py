@@ -287,8 +287,8 @@ class RiskService:
 		total_loss_pct: float,
 		strength: float = 1.0,
 		user_id: int | None = None
-	) -> bool:
-		"""Унифицированная проверка всех условий риска."""
+		) -> bool:
+		"""Унифицированная проверка всех условий риска и стратегии."""
 		try:
 			# ✅ проверка, что конфиги загружены
 			if not self.STRATEGY_CONFIG or not self.RISK_CONFIG:
@@ -298,6 +298,7 @@ class RiskService:
 				logger.error(f"❌ Strategy config not found for {symbol}")
 				return False
 
+			strategy = self.STRATEGY_CONFIG[symbol]
 			risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
 			position_size = await self.calculate_position_size(
 				symbol, deposit, entry_price, stop_loss_pct, strength, user_id
@@ -342,12 +343,46 @@ class RiskService:
 				})
 				return False
 
+			# --- Проверка условий стратегии ---
+			direction = None
+
+			# RSI thresholds
+			last_rsi = strategy.get("last_rsi")
+			rsi_lower = strategy.get("rsi_lower_threshold", 30)
+			rsi_upper = strategy.get("rsi_upper_threshold", 70)
+			if last_rsi is not None:
+				if last_rsi < rsi_lower:
+					direction = "long"
+				elif last_rsi > rsi_upper:
+					direction = "short"
+
+			# Stochastic thresholds
+			last_stoch = strategy.get("last_stoch")
+			stoch_lower = strategy.get("stochastic_lower_threshold", 20)
+			stoch_upper = strategy.get("stochastic_upper_threshold", 80)
+			if last_stoch is not None:
+				if last_stoch < stoch_lower:
+					direction = "long"
+				elif last_stoch > stoch_upper:
+					direction = "short"
+
+			# Sentiment thresholds
+			last_sentiment = strategy.get("last_sentiment")
+			sentiment_long = strategy.get("sentiment_long_threshold", -0.5)
+			sentiment_short = strategy.get("sentiment_short_threshold", 0.5)
+			if direction == "long" and last_sentiment is not None and last_sentiment < sentiment_long:
+				await self._log_violation("Sentiment blocks long entry", symbol, position_size, deposit)
+				return False
+			if direction == "short" and last_sentiment is not None and last_sentiment > sentiment_short:
+				await self._log_violation("Sentiment blocks short entry", symbol, position_size, deposit)
+				return False
+
 			# --- Проверка Risk/Reward ---
 			rr_ratio = risk_config.get("risk_reward_ratio", 1.5)
 			potential_loss = entry_price * stop_loss_pct
 
-			tp_targets = self.STRATEGY_CONFIG[symbol].get("take_profit_targets", [0.03])
-			tp_distribution = self.STRATEGY_CONFIG[symbol].get(
+			tp_targets = strategy.get("take_profit_targets", [0.03])
+			tp_distribution = strategy.get(
 				"take_profit_distribution",
 				[1 / len(tp_targets)] * len(tp_targets)
 			)
@@ -392,3 +427,4 @@ class RiskService:
 				"error": f"Risk validation error: {e}"
 			})
 			return False
+

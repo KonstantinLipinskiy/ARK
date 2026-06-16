@@ -616,9 +616,26 @@ async def update_strategy(db: AsyncSession, symbol: str, updates: dict):
 	strategy = result.scalars().first()
 	if not strategy:
 		return None
+
+	allowed_fields = {
+		"enabled_indicators", "entry_conditions",
+		"ema_short", "ema_long", "rsi_period",
+		"rsi_lower_threshold", "rsi_upper_threshold",
+		"atr_period", "macd_fast", "macd_slow", "macd_signal",
+		"stochastic_period", "stochastic_lower_threshold", "stochastic_upper_threshold",
+		"bollinger_period", "obv_enabled", "volume_period", "vwap_enabled",
+		"ichimoku_tenkan", "ichimoku_kijun", "ichimoku_senkou",
+		"sentiment_long_threshold", "sentiment_short_threshold",
+		"stop_loss", "take_profit_targets", "take_profit_distribution",
+		"trailing_stop", "trailing_mode",
+		"allocation_percent", "leverage",
+		"strength_multiplier", "enabled"
+	}
+
 	for key, value in updates.items():
-		if hasattr(strategy, key):
+		if key in allowed_fields and value is not None:
 			setattr(strategy, key, value)
+
 	try:
 		await db.commit()
 		await db.refresh(strategy)
@@ -627,6 +644,7 @@ async def update_strategy(db: AsyncSession, symbol: str, updates: dict):
 		await db.rollback()
 		logger.error(f"Ошибка обновления стратегии: {e}")
 		raise
+
 
 async def delete_strategy(db: AsyncSession, symbol: str):
 	result = await db.execute(select(schemas.StrategyORM).filter(schemas.StrategyORM.symbol == symbol))

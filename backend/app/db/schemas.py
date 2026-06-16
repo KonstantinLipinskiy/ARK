@@ -162,6 +162,8 @@ class StrategyORM(Base):
 	ema_short = Column(Integer, nullable=True)
 	ema_long = Column(Integer, nullable=True)
 	rsi_period = Column(Integer, nullable=True)
+	rsi_lower_threshold = Column(Integer, nullable=True, default=30)   # 🔹 новый порог
+	rsi_upper_threshold = Column(Integer, nullable=True, default=70)   # 🔹 новый порог
 	atr_period = Column(Integer, nullable=True)
 
 	# --- MACD ---
@@ -171,6 +173,8 @@ class StrategyORM(Base):
 
 	# --- Stochastic ---
 	stochastic_period = Column(Integer, nullable=True)
+	stochastic_lower_threshold = Column(Integer, nullable=True, default=20)  # 🔹 новый порог
+	stochastic_upper_threshold = Column(Integer, nullable=True, default=80)  # 🔹 новый порог
 
 	# --- Bollinger Bands ---
 	bollinger_period = Column(Integer, nullable=True)
@@ -189,6 +193,10 @@ class StrategyORM(Base):
 	ichimoku_kijun = Column(Integer, nullable=True, default=26)
 	ichimoku_senkou = Column(Integer, nullable=True, default=52)
 
+	# --- Sentiment thresholds ---
+	sentiment_long_threshold = Column(Float, nullable=True, default=-0.5)   # 🔹 блок long при плохих новостях
+	sentiment_short_threshold = Column(Float, nullable=True, default=0.5)   # 🔹 блок short при позитивных новостях
+
 	# --- Риск-менеджмент ---
 	stop_loss = Column(Float, nullable=False)
 	take_profit_targets = Column(JSON, nullable=False)
@@ -203,7 +211,8 @@ class StrategyORM(Base):
 
 	# --- Дополнительно ---
 	strength_multiplier = Column(Float, nullable=False, default=1.0)
-	enabled = Column(Boolean, default=True)  # 🔹 добавлено для симметрии
+	enabled = Column(Boolean, default=True)
+
 
 class RiskSettingsORM(Base):
 	__tablename__ = "risk_settings"
