@@ -1,3 +1,4 @@
+#app/db/schemas.py
 from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, BigInteger, JSON
 from sqlalchemy.orm import relationship
 import enum
@@ -208,16 +209,27 @@ class RiskSettingsORM(Base):
 	__tablename__ = "risk_settings"
 
 	id = Column(Integer, primary_key=True, index=True)
-	max_risk_per_trade = Column(Float, nullable=False, default=0.01)
-	max_open_trades = Column(Integer, nullable=False, default=5)
-	max_daily_loss = Column(Float, nullable=False, default=0.05)
-	max_leverage = Column(Integer, nullable=False, default=3)
 
-	cooldown_between_trades = Column(Integer, nullable=False, default=60)
-	risk_reward_ratio = Column(Float, nullable=False, default=1.5)
-	dynamic_allocation = Column(Boolean, nullable=False, default=False)
+	# 🔹 Основные лимиты
+	max_risk_per_trade = Column(Float, nullable=False, default=0.01)   # макс. риск на сделку (% депозита)
+	max_open_trades = Column(Integer, nullable=False, default=5)       # макс. число открытых сделок
+	max_daily_loss = Column(Float, nullable=False, default=0.05)       # макс. дневной убыток (% депозита)
+	max_leverage = Column(Integer, nullable=False, default=3)          # макс. плечо
 
+	# 🔹 Дополнительные параметры
+	cooldown_between_trades = Column(Integer, nullable=False, default=60)   # задержка между сделками (сек)
+	risk_reward_ratio = Column(Float, nullable=False, default=1.5)          # соотношение риск/прибыль
+	dynamic_allocation = Column(Boolean, nullable=False, default=False)     # включена ли динамическая аллокация
+
+	# 🔹 Новые параметры риска
+	commission_rate = Column(Float, nullable=False, default=0.001)          # комиссия биржи
+	slippage_tolerance = Column(Float, nullable=False, default=0.0005)      # проскальзывание
+	signal_strength_multiplier = Column(Float, nullable=False, default=2.0) # множитель силы сигнала
+	atr_multiplier = Column(Float, nullable=False, default=2.0)             # множитель ATR для стопов
+
+	# 🔹 Метаданные
 	updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
 
 class IndicatorORM(Base):
 	__tablename__ = "indicators"

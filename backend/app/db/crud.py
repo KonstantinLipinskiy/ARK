@@ -852,3 +852,39 @@ async def delete_ml_model(db: AsyncSession, model_id: int) -> bool:
 		await db.rollback()
 		logger.error(f"Ошибка удаления ML модели: {e}")
 		raise
+
+
+# ---------- Risk Settings ----------
+async def get_risk_settings(db: AsyncSession) -> schemas.RiskSettingsORM | None:
+    """Получить текущие параметры риска (берём первую запись)."""
+    result = await db.execute(select(schemas.RiskSettingsORM).limit(1))
+    return result.scalars().first()
+
+
+async def update_risk_settings(db: AsyncSession, updates: dict) -> schemas.RiskSettingsORM | None:
+	"""Обновить параметры риска."""
+	result = await db.execute(select(schemas.RiskSettingsORM).limit(1))
+	settings_obj = result.scalars().first()
+
+	if not settings_obj:
+		# если записи нет — создаём новую
+		settings_obj = schemas.RiskSettingsORM(**updates)
+		db.add(settings_obj)
+	else:
+		allowed_fields = {
+			"max_risk_per_trade", "max_open_trades", "max_daily_loss", "max_leverage",
+			"cooldown_between_trades", "risk_reward_ratio", "dynamic_allocation",
+			"commission_rate", "slippage_tolerance", "signal_strength_multiplier", "atr_multiplier"
+		}
+		for key, value in updates.items():
+			if key in allowed_fields and value is not None:
+				setattr(settings_obj, key, value)
+
+	try:
+		await db.commit()
+		await db.refresh(settings_obj)
+		return settings_obj
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка обновления risk_settings: {e}")
+		return None

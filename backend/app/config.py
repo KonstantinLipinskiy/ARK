@@ -81,6 +81,11 @@ class Settings(BaseSettings):
 		"hidden_size": 64
 	}
 
+	DEFAULT_DEPOSIT: float = float(os.getenv("DEFAULT_DEPOSIT", 1000))  # базовый депозит
+	COMMISSION_RATE: float = float(os.getenv("COMMISSION_RATE", 0.001))  # комиссия биржи (0.1%)
+	SLIPPAGE_TOLERANCE: float = float(os.getenv("SLIPPAGE_TOLERANCE", 0.0005))  # проскальзывание (0.05%)
+	SIGNAL_STRENGTH_MULTIPLIER: float = float(os.getenv("SIGNAL_STRENGTH_MULTIPLIER", 2.0))  # множитель силы сигнала
+	ATR_MULTIPLIER: float = float(os.getenv("ATR_MULTIPLIER", 2.0))  # множитель ATR для стопов
 
 
 settings = Settings()

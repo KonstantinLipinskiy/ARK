@@ -1,12 +1,14 @@
+#app/services/risk.py
 import asyncio
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.db.schemas import RiskLog, TradeORM, UserORM, FundingRateORM   # 🔹 добавили FundingRateORM
+from app.db.schemas import RiskLog, TradeORM, UserORM, FundingRateORM
 from app.utils.logger import logger
-from app.services.rabbitmq import RabbitMQBroker
-from app.services.exchange import load_strategies, get_funding_rate, get_mark_price   # 🔹 новые методы
+from app.broker.rabbitmq import RabbitMQBroker
+from app.services.exchange import load_strategies, get_funding_rate, get_mark_price
 from app.services.risk_service import load_risk_settings
+from app.config import settings
 
 RISK_PROFILES = {
 	"conservative": {"max_risk_per_trade": 0.005, "max_daily_loss": 0.03, "max_leverage": 1},
@@ -43,12 +45,12 @@ class RiskService:
 		try:
 			funding = await get_funding_rate(symbol)
 			if "error" in funding:
-					return funding
+				return funding
 
 			record = FundingRateORM(
-					symbol=symbol,
-					rate=funding["fundingRate"],
-					timestamp=funding["timestamp"]
+				symbol=symbol,
+				rate=funding["fundingRate"],
+				timestamp=funding["timestamp"]
 			)
 			self.db_session.add(record)
 			await self.db_session.commit()
@@ -64,13 +66,13 @@ class RiskService:
 		try:
 			mark = await get_mark_price(symbol)
 			if "error" in mark:
-					return False
+				return False
 
 			mark_price = mark["markPrice"]
 			liquidation_threshold = entry_price * (1 - 1 / leverage)
 			if mark_price <= liquidation_threshold:
-					logger.warning(f"⚠️ {symbol} близко к ликвидации! Mark={mark_price}, Entry={entry_price}")
-					return True
+				logger.warning(f"⚠️ {symbol} близко к ликвидации! Mark={mark_price}, Entry={entry_price}")
+				return True
 			return False
 		except Exception as e:
 			logger.error(f"❌ Liquidation risk check failed for {symbol}: {e}")
@@ -85,16 +87,16 @@ class RiskService:
 			result = await self.db_session.execute(select(UserORM).filter(UserORM.id == user_id))
 			user = result.scalars().first()
 			if not user or not user.settings:
-					self._user_risk_cache[user_id] = self.RISK_CONFIG
-					return self.RISK_CONFIG
+				self._user_risk_cache[user_id] = self.RISK_CONFIG
+				return self.RISK_CONFIG
 
 			profile = user.settings.get("risk_profile", None)
 			custom_config = user.settings.get("custom_risk", {})
 
 			if profile and profile in RISK_PROFILES:
-					config = {**self.RISK_CONFIG, **RISK_PROFILES[profile], **custom_config}
+				config = {**self.RISK_CONFIG, **RISK_PROFILES[profile], **custom_config}
 			else:
-					config = {**self.RISK_CONFIG, **custom_config}
+				config = {**self.RISK_CONFIG, **custom_config}
 
 			self._user_risk_cache[user_id] = config
 			return config
@@ -106,15 +108,15 @@ class RiskService:
 		"""Возвращает коэффициент производительности пары на основе winrate/прибыльности."""
 		try:
 			result = await self.db_session.execute(
-					select(
-						func.count(TradeORM.id),
-						func.sum(TradeORM.profit_loss),
-						func.sum(func.case((TradeORM.profit_loss > 0, 1), else_=0))
-					).where(TradeORM.symbol == symbol)
+				select(
+					func.count(TradeORM.id),
+					func.sum(TradeORM.profit_loss),
+					func.sum(func.case((TradeORM.profit_loss > 0, 1), else_=0))
+				).where(TradeORM.symbol == symbol)
 			)
 			total_trades, total_profit, wins = result.first()
 			if not total_trades or total_trades < 30:
-					return 1.0
+				return 1.0
 
 			winrate = wins / total_trades
 			avg_profit = (total_profit / total_trades) if total_trades else 0
@@ -127,7 +129,7 @@ class RiskService:
 	async def calculate_position_size(
 		self,
 		symbol: str,
-		deposit: float,
+		deposit: float | None,
 		entry_price: float,
 		stop_loss_pct: float,
 		strength: float = 1.0,
@@ -136,21 +138,30 @@ class RiskService:
 	) -> float:
 		"""Расчёт размера позиции с учётом риска, allocation, силы сигнала и ML confidence."""
 		risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
+
+		# --- депозит из настроек ---
+		deposit = deposit or risk_config.get("default_deposit", settings.DEFAULT_DEPOSIT)
+
+		# --- комиссия и проскальзывание ---
+		commission = risk_config.get("commission_rate", settings.COMMISSION_RATE)
+		slippage = risk_config.get("slippage_tolerance", settings.SLIPPAGE_TOLERANCE)
+		effective_entry = entry_price * (1 + commission + slippage)
+
 		risk_amount = deposit * risk_config.get("max_risk_per_trade", 0.01)
 
 		# --- масштабирование риска ---
 		if risk_config.get("dynamic_allocation", False):
-			multiplier = min(strength, 2.0)
+			multiplier = min(strength * risk_config.get("signal_strength_multiplier", settings.SIGNAL_STRENGTH_MULTIPLIER), 3.0)
 			if ml_confidence:
-					multiplier *= (1 + ml_confidence)
+				multiplier *= (1 + ml_confidence)
 			risk_amount *= multiplier
 
 		# --- базовые параметры стратегии ---
 		if symbol not in self.STRATEGY_CONFIG:
 			await self.refresh_config()
 			if symbol not in self.STRATEGY_CONFIG:
-					logger.error(f"❌ Strategy config not found for {symbol}")
-					return 0.0
+				logger.error(f"❌ Strategy config not found for {symbol}")
+				return 0.0
 
 		base_allocation = self.STRATEGY_CONFIG[symbol].get("allocation_percent", 0.05)
 		strength_multiplier = self.STRATEGY_CONFIG[symbol].get("strength_multiplier", 1.0)
@@ -160,11 +171,11 @@ class RiskService:
 			performance_factor = await self._get_pair_performance(symbol)
 			confidence_factor = 1.0 + (ml_confidence or 0)
 			dynamic_allocation = (
-					base_allocation
-					* performance_factor
-					* strength
-					* strength_multiplier
-					* confidence_factor
+				base_allocation
+				* performance_factor
+				* strength
+				* strength_multiplier
+				* confidence_factor
 			)
 			allocation_percent = min(dynamic_allocation, base_allocation * 2)
 		else:
@@ -172,12 +183,12 @@ class RiskService:
 
 		# --- итоговый размер позиции ---
 		allocated_deposit = deposit * allocation_percent
-		stop_loss_amount = entry_price * stop_loss_pct
+		stop_loss_amount = effective_entry * stop_loss_pct
 		position_size_by_risk = risk_amount / stop_loss_amount if stop_loss_amount > 0 else 0
-		position_size_by_allocation = allocated_deposit / entry_price if entry_price > 0 else 0
+		position_size_by_allocation = allocated_deposit / effective_entry if effective_entry > 0 else 0
 
 		position_size = min(position_size_by_risk, position_size_by_allocation)
-		max_position = (deposit * risk_config.get("max_leverage", 1)) / entry_price if entry_price > 0 else 0
+		max_position = (deposit * risk_config.get("max_leverage", 1)) / effective_entry if effective_entry > 0 else 0
 		return min(position_size, max_position)
 
 	def calculate_leverage(self, symbol: str, strength: float, user_risk_config: dict | None = None) -> int:
@@ -193,11 +204,42 @@ class RiskService:
 		else:
 			return min(base_leverage + 1, max_leverage)
 
-	def apply_stop_loss(self, entry_price: float, stop_loss_pct: float, direction: str = "long") -> float:
-		return entry_price * (1 - stop_loss_pct) if direction == "long" else entry_price * (1 + stop_loss_pct)
+	def apply_stop_loss(
+		self,
+		entry_price: float,
+		stop_loss_pct: float,
+		direction: str = "long",
+		atr: float | None = None,
+		risk_config: dict | None = None
+	) -> float:
+		"""Расчёт стоп-лосса с учётом ATR множителя."""
+		atr_mult = (risk_config or self.RISK_CONFIG).get("atr_multiplier", settings.ATR_MULTIPLIER)
+		if direction == "long":
+			stop = entry_price * (1 - stop_loss_pct)
+			if atr:
+				stop = min(stop, entry_price - atr_mult * atr)
+		else:
+			stop = entry_price * (1 + stop_loss_pct)
+			if atr:
+				stop = max(stop, entry_price + atr_mult * atr)
+		return stop
 
-	def apply_take_profit(self, entry_price: float, targets: list[float], direction: str = "long") -> list[float]:
-		return [entry_price * (1 + tp) for tp in targets] if direction == "long" else [entry_price * (1 - tp) for tp in targets]
+	def apply_take_profit(
+		self,
+		entry_price: float,
+		targets: list[float],
+		direction: str = "long",
+		risk_config: dict | None = None
+	) -> list[float]:
+		"""Расчёт тейк-профитов с учётом комиссии и проскальзывания."""
+		commission = (risk_config or self.RISK_CONFIG).get("commission_rate", settings.COMMISSION_RATE)
+		slippage = (risk_config or self.RISK_CONFIG).get("slippage_tolerance", settings.SLIPPAGE_TOLERANCE)
+		effective_entry = entry_price * (1 + commission + slippage)
+
+		if direction == "long":
+			return [effective_entry * (1 + tp) for tp in targets]
+		else:
+			return [effective_entry * (1 - tp) for tp in targets]
 
 	def apply_trailing_stop(self, current_price: float, stop_price: float, trailing_pct: float, direction: str = "long") -> float:
 		if direction == "long":
@@ -223,11 +265,11 @@ class RiskService:
 		"""Запись нарушения риск-менеджмента в БД и лог."""
 		try:
 			violation = RiskLog(
-					reason=reason,
-					symbol=symbol,
-					position_size=position_size,
-					deposit=deposit,
-					timestamp=datetime.utcnow()
+				reason=reason,
+				symbol=symbol,
+				position_size=position_size,
+				deposit=deposit,
+				timestamp=datetime.utcnow()
 			)
 			self.db_session.add(violation)
 			await self.db_session.commit()
@@ -250,55 +292,55 @@ class RiskService:
 		try:
 			# ✅ проверка, что конфиги загружены
 			if not self.STRATEGY_CONFIG or not self.RISK_CONFIG:
-					await self.refresh_config()
+				await self.refresh_config()
 
 			if symbol not in self.STRATEGY_CONFIG:
-					logger.error(f"❌ Strategy config not found for {symbol}")
-					return False
+				logger.error(f"❌ Strategy config not found for {symbol}")
+				return False
 
 			risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
 			position_size = await self.calculate_position_size(
-					symbol, deposit, entry_price, stop_loss_pct, strength, user_id
+				symbol, deposit, entry_price, stop_loss_pct, strength, user_id
 			)
 
 			# --- Проверка дневного лимита ---
 			if not self.check_daily_loss(total_loss_pct, risk_config):
-					await self._log_violation("Daily loss limit exceeded", symbol, position_size, deposit)
-					await self.broker.publish_telegram({
-						"type": "risk_violation",
-						"user_id": user_id,
-						"reason": "Daily loss limit exceeded",
-						"symbol": symbol,
-						"position_size": position_size,
-						"deposit": deposit
-					})
-					return False
+				await self._log_violation("Daily loss limit exceeded", symbol, position_size, deposit)
+				await self.broker.publish_telegram({
+					"type": "risk_violation",
+					"user_id": user_id,
+					"reason": "Daily loss limit exceeded",
+					"symbol": symbol,
+					"position_size": position_size,
+					"deposit": deposit
+				})
+				return False
 
 			# --- Проверка количества сделок ---
 			if not self.check_open_trades(open_trades, risk_config):
-					await self._log_violation("Too many open trades", symbol, position_size, deposit)
-					await self.broker.publish_telegram({
-						"type": "risk_violation",
-						"user_id": user_id,
-						"reason": "Too many open trades",
-						"symbol": symbol,
-						"position_size": position_size,
-						"deposit": deposit
-					})
-					return False
+				await self._log_violation("Too many open trades", symbol, position_size, deposit)
+				await self.broker.publish_telegram({
+					"type": "risk_violation",
+					"user_id": user_id,
+					"reason": "Too many open trades",
+					"symbol": symbol,
+					"position_size": position_size,
+					"deposit": deposit
+				})
+				return False
 
 			# --- Проверка cooldown ---
 			if not self.check_cooldown(risk_config):
-					await self._log_violation("Cooldown between trades not respected", symbol, position_size, deposit)
-					await self.broker.publish_telegram({
-						"type": "risk_violation",
-						"user_id": user_id,
-						"reason": "Cooldown not respected",
-						"symbol": symbol,
-						"position_size": position_size,
-						"deposit": deposit
-					})
-					return False
+				await self._log_violation("Cooldown between trades not respected", symbol, position_size, deposit)
+				await self.broker.publish_telegram({
+					"type": "risk_violation",
+					"user_id": user_id,
+					"reason": "Cooldown not respected",
+					"symbol": symbol,
+					"position_size": position_size,
+					"deposit": deposit
+				})
+				return False
 
 			# --- Проверка Risk/Reward ---
 			rr_ratio = risk_config.get("risk_reward_ratio", 1.5)
@@ -306,47 +348,47 @@ class RiskService:
 
 			tp_targets = self.STRATEGY_CONFIG[symbol].get("take_profit_targets", [0.03])
 			tp_distribution = self.STRATEGY_CONFIG[symbol].get(
-					"take_profit_distribution",
-					[1 / len(tp_targets)] * len(tp_targets)
+				"take_profit_distribution",
+				[1 / len(tp_targets)] * len(tp_targets)
 			)
 
 			weighted_tp = sum(tp * w for tp, w in zip(tp_targets, tp_distribution))
 			potential_profit = entry_price * weighted_tp
 
 			if potential_profit / potential_loss < rr_ratio:
-					await self._log_violation("Risk/Reward ratio too low", symbol, position_size, deposit)
-					await self.broker.publish_telegram({
-						"type": "risk_violation",
-						"user_id": user_id,
-						"reason": "Risk/Reward ratio too low",
-						"symbol": symbol,
-						"position_size": position_size,
-						"deposit": deposit
-					})
-					return False
+				await self._log_violation("Risk/Reward ratio too low", symbol, position_size, deposit)
+				await self.broker.publish_telegram({
+					"type": "risk_violation",
+					"user_id": user_id,
+					"reason": "Risk/Reward ratio too low",
+					"symbol": symbol,
+					"position_size": position_size,
+					"deposit": deposit
+				})
+				return False
 
 			# --- Успешная валидация ---
 			self.last_trade_time = datetime.utcnow()
 			await self.broker.publish_telegram({
-					"type": "trade",
-					"user_id": user_id,
-					"trade": {
-						"pair": symbol,
-						"status": "validated",
-						"entry": entry_price,
-						"stop_loss": stop_loss_pct,
-						"take_profit": tp_targets,
-						"leverage": risk_config.get("max_leverage", 1),
-						"confidence_score": strength
-					}
+				"type": "trade",
+				"user_id": user_id,
+				"trade": {
+					"pair": symbol,
+					"status": "validated",
+					"entry": entry_price,
+					"stop_loss": stop_loss_pct,
+					"take_profit": tp_targets,
+					"leverage": risk_config.get("max_leverage", 1),
+					"confidence_score": strength
+				}
 			})
 			return True
 
 		except Exception as e:
 			logger.error(f"❌ Risk validation error: {e}")
 			await self.broker.publish_telegram({
-					"type": "error",
-					"user_id": user_id,
-					"error": f"Risk validation error: {e}"
+				"type": "error",
+				"user_id": user_id,
+				"error": f"Risk validation error: {e}"
 			})
 			return False
