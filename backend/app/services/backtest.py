@@ -111,6 +111,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 				signals = []
 				direction = None
 
+				# --- Проверка индикаторов ---
 				for ind in condition:
 					if ind == "EMA":
 						if row["ema_short"] > row["ema_long"]:
@@ -194,18 +195,28 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 						"leverage": leverage,
 						"news_sentiment": row.get("news_sentiment", 0)
 					}
-					await broker.publish_telegram({
-						"type": "trade",
-						"trade": {
-							"pair": pair,
-							"side": direction,
-							"entry": entry_price,
-							"stop_loss": stop_price,
-							"take_profit": tp_levels,
-							"amount": amount,
-							"leverage": leverage
-						}
-					})
+
+					logger.info(
+						f"📈 Trade opened | {pair} | side={direction} | entry={entry_price} | stop={stop_price} | tp={tp_levels} "
+						f"| amount={amount:.4f} | lev={leverage} | sentiment={row.get('news_sentiment', 0)}",
+						extra=position
+						)
+
+					try:
+						await broker.publish_telegram({
+							"type": "trade",
+							"trade": {
+								"pair": pair,
+								"side": direction,
+								"entry": entry_price,
+								"stop_loss": stop_price,
+								"take_profit": tp_levels,
+								"amount": amount,
+								"leverage": leverage
+							}
+						})
+					except Exception as e:
+						logger.error(f"❌ Broker publish failed for {pair}: {e}")
 					break
 
 		elif position is not None:
@@ -213,15 +224,33 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 			if position["side"] == "long":
 				if price <= position["stop"]:
 					position["exit"] = price; position["status"] = "stopped"
+					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
+					logger.info(
+						f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
+						f"| status=stopped | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						extra=position
+					)
 					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] - strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price <= dynamic_stop:
 						position["exit"] = price; position["status"] = "atr_stop"
+						pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
+						logger.info(
+							f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
+							f"| status=atr_stop | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+							extra=position
+						)
 						trades.append(position); position = None
 				elif price >= position["tp"][0]:
 					position["exit"] = price; position["status"] = "take_profit"
+					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
+					logger.info(
+						f"✅ Trade take_profit | {pair} | side=long | entry={position['entry']} | exit={price} "
+						f"| pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						extra=position
+					)
 					trades.append(position)
 					position["tp"].pop(0)
 					if len(position["tp"]) == 0: position = None
@@ -229,15 +258,33 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 			elif position["side"] == "short":
 				if price >= position["stop"]:
 					position["exit"] = price; position["status"] = "stopped"
+					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
+					logger.info(
+						f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
+						f"| status=stopped | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						extra=position
+					)
 					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] + strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price >= dynamic_stop:
 						position["exit"] = price; position["status"] = "atr_stop"
+						pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
+						logger.info(
+							f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
+							f"| status=atr_stop | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+							extra=position
+						)
 						trades.append(position); position = None
 				elif price <= position["tp"][0]:
 					position["exit"] = price; position["status"] = "take_profit"
+					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
+					logger.info(
+						f"✅ Trade take_profit | {pair} | side=short | entry={position['entry']} | exit={price} "
+						f"| pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						extra=position
+					)
 					trades.append(position)
 					position["tp"].pop(0)
 					if len(position["tp"]) == 0: position = None
@@ -271,7 +318,7 @@ def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
 	avg_sentiment_loss = np.mean([t.get("news_sentiment", 0) for t in trades
 									if "exit" in t and (t["exit"] - t["entry"]) <= 0]) if len(trades) > len(wins) else 0
 
-	return {
+	metrics = {
 		"winrate": round(winrate, 2),
 		"avg_profit": round(avg_profit, 4),
 		"max_drawdown": round(max_drawdown, 4),
@@ -279,6 +326,12 @@ def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
 		"avg_sentiment_win": round(avg_sentiment_win, 4),
 		"avg_sentiment_loss": round(avg_sentiment_loss, 4)
 	}
+
+	# Логируем метрики для Prometheus/Grafana
+	for key, value in metrics.items():
+		logger.info("Metrics collected", extra={"metric": key, "value": value})
+
+	return metrics
 
 # --- Сохранение сделок и метрик ---
 async def save_trades_to_db(trades, pair: str, strategy_name: str = "default", user_id: int = 1):
@@ -322,8 +375,8 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: st
 
 	if "ema_short" in data.columns:
 		plt.plot(data["ema_short"], label="EMA Short", color="orange")
-	if "ema_long" in data.columns:
-		plt.plot(data["ema_long"], label="EMA Long", color="red")
+		if "ema_long" in data.columns:
+			plt.plot(data["ema_long"], label="EMA Long", color="red")
 	if "rsi" in data.columns:
 		plt.plot(data["rsi"], label="RSI", color="purple")
 	if "macd_line" in data.columns and "macd_signal" in data.columns:
@@ -369,25 +422,48 @@ if __name__ == "__main__":
 					strategy_name = strategy.get("name", "default")
 
 					async def run_single_backtest(pair=pair, strategy=strategy, strategy_name=strategy_name, df=df.copy()):
-						results = await backtest_strategy(df, pair, strategy, session=session)
-						metrics = calculate_metrics(results, initial_deposit=settings.DEFAULT_DEPOSIT)
-
-						all_metrics[f"{pair}_{strategy_name}"] = metrics
-						all_results[f"{pair}_{strategy_name}"] = results
-
-						await save_trades_to_db(results, pair, strategy_name=strategy_name)
-						await save_metrics_to_db(metrics, pair, strategy_name=strategy_name)
-
 						try:
-							df_trades = pd.DataFrame(results)
-							if not df_trades.empty:
-								df_trades["result"] = (df_trades["exit"] - df_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
-								train_metrics = ml_service.train(df_trades, model_type=settings.MODEL_TYPE)
-								logger.info(f"ML обучение завершено для {pair} ({strategy_name}): {train_metrics}")
-						except Exception as e:
-							logger.error(f"Ошибка обучения ML на истории {pair} ({strategy_name}): {e}")
+							results = await backtest_strategy(df, pair, strategy, session=session)
+							metrics = calculate_metrics(results, initial_deposit=settings.DEFAULT_DEPOSIT)
 
-						plot_backtest(df, results, pair, strategy_name)
+							all_metrics[f"{pair}_{strategy_name}"] = metrics
+							all_results[f"{pair}_{strategy_name}"] = results
+
+							await save_trades_to_db(results, pair, strategy_name=strategy_name)
+							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name)
+
+							try:
+								df_trades = pd.DataFrame(results)
+								if not df_trades.empty:
+									df_trades["result"] = (df_trades["exit"] - df_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
+									train_metrics = ml_service.train(df_trades, model_type=settings.MODEL_TYPE)
+									ml_service.save_model(settings.MODEL_PATH)
+									logger.info(f"ML обучение завершено для {pair} ({strategy_name}): {train_metrics}")
+							except Exception as e:
+								logger.error(f"❌ Ошибка обучения ML на истории {pair} ({strategy_name}): {e}")
+								await crud.create_risk_log(session, {
+									"reason": f"ML training failed: {e}",
+									"symbol": pair,
+									"position_size": None,
+									"deposit": settings.DEFAULT_DEPOSIT,
+									"sentiment": None,
+									"profit_loss": None,
+									"expected_pnl": None
+								})
+
+							plot_backtest(df, results, pair, strategy_name)
+
+						except Exception as e:
+							logger.error(f"❌ Ошибка бэктеста для {pair} ({strategy_name}): {e}")
+							await crud.create_risk_log(session, {
+								"reason": f"Backtest failed: {e}",
+								"symbol": pair,
+								"position_size": None,
+								"deposit": settings.DEFAULT_DEPOSIT,
+								"sentiment": None,
+								"profit_loss": None,
+								"expected_pnl": None
+							})
 
 					tasks.append(run_single_backtest())
 
@@ -399,10 +475,9 @@ if __name__ == "__main__":
 	print("\n=== Сводный отчёт по всем парам и стратегиям ===")
 	print(df_report)
 
-	with pd.ExcelWriter("backtest_summary.xlsx", engine="openpyxl") as writer:
-		df_report.to_excel(writer, sheet_name="Metrics")
-		for key, trades in all_results.items():
-			df_trades = pd.DataFrame(trades)
-			sheet_name = key.replace("/", "_")[:30]
-			df_trades.to_excel(writer, sheet_name=sheet_name)
-	print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
+	# 🔹 Excel отчёт только для отладки
+	if getattr(settings, "DEBUG_EXPORT", False):
+		from app.utils.export import export_to_excel
+		export_to_excel(all_metrics, all_results)
+		print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
+

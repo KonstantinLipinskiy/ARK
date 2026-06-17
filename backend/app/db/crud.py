@@ -874,9 +874,9 @@ async def delete_ml_model(db: AsyncSession, model_id: int) -> bool:
 
 # ---------- Risk Settings ----------
 async def get_risk_settings(db: AsyncSession) -> schemas.RiskSettingsORM | None:
-    """Получить текущие параметры риска (берём первую запись)."""
-    result = await db.execute(select(schemas.RiskSettingsORM).limit(1))
-    return result.scalars().first()
+	"""Получить текущие параметры риска (берём первую запись)."""
+	result = await db.execute(select(schemas.RiskSettingsORM).limit(1))
+	return result.scalars().first()
 
 
 async def update_risk_settings(db: AsyncSession, updates: dict) -> schemas.RiskSettingsORM | None:
@@ -906,3 +906,100 @@ async def update_risk_settings(db: AsyncSession, updates: dict) -> schemas.RiskS
 		await db.rollback()
 		logger.error(f"Ошибка обновления risk_settings: {e}")
 		return None
+
+
+# ---------- Risk Logs ----------
+async def create_risk_log(db: AsyncSession, log_data: dict) -> schemas.RiskLog:
+	"""Создать запись нарушения риск-менеджмента."""
+	try:
+		risk_log = schemas.RiskLog(
+			reason=log_data["reason"],
+			symbol=log_data.get("symbol"),
+			position_size=log_data.get("position_size"),
+			deposit=log_data.get("deposit"),
+			sentiment=log_data.get("sentiment"),
+			profit_loss=log_data.get("profit_loss"),
+			expected_pnl=log_data.get("expected_pnl")
+		)
+		db.add(risk_log)
+		await db.commit()
+		await db.refresh(risk_log)
+		return risk_log
+	except SQLAlchemyError as e:
+		await db.rollback()
+		logger.error(f"Ошибка создания RiskLog: {e}")
+		raise
+
+async def get_risk_logs(
+	db: AsyncSession,
+	skip: int = 0,
+	limit: int = 100,
+	symbol: str = None,
+	reason: str = None,
+	date_from: datetime = None,
+	date_to: datetime = None,
+	sentiment: float = None,
+	profit_loss_min: float = None,
+	profit_loss_max: float = None
+):
+	"""Получить список логов риска с фильтрацией и пагинацией."""
+	query = select(schemas.RiskLog)
+	if symbol:
+		query = query.filter(schemas.RiskLog.symbol == symbol)
+	if reason:
+		query = query.filter(schemas.RiskLog.reason.ilike(f"%{reason}%"))
+	if date_from:
+		query = query.filter(schemas.RiskLog.timestamp >= date_from)
+	if date_to:
+		query = query.filter(schemas.RiskLog.timestamp <= date_to)
+	if sentiment is not None:
+		query = query.filter(schemas.RiskLog.sentiment >= sentiment)
+	if profit_loss_min is not None:
+		query = query.filter(schemas.RiskLog.profit_loss >= profit_loss_min)
+	if profit_loss_max is not None:
+		query = query.filter(schemas.RiskLog.profit_loss <= profit_loss_max)
+
+	total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+	result = await db.execute(query.offset(skip).limit(limit))
+	logs = result.scalars().all()
+
+	return {
+		"items": logs,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}
+
+async def get_backtest_reports_paginated(
+	db: AsyncSession,
+	skip: int = 0,
+	limit: int = 100,
+	symbol: str = None,
+	strategy: str = None,
+	user_id: int = None,
+	date_from: datetime = None,
+	date_to: datetime = None
+):
+	"""Получить отчёты бэктеста с фильтрацией и пагинацией."""
+	query = select(schemas.BacktestReport)
+	if symbol:
+		query = query.filter(schemas.BacktestReport.symbol == symbol)
+	if strategy:
+		query = query.filter(schemas.BacktestReport.strategy == strategy)
+	if user_id:
+		query = query.filter(schemas.BacktestReport.user_id == user_id)
+	if date_from:
+		query = query.filter(schemas.BacktestReport.created_at >= date_from)
+	if date_to:
+		query = query.filter(schemas.BacktestReport.created_at <= date_to)
+
+	total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+	result = await db.execute(query.offset(skip).limit(limit))
+	reports = result.scalars().all()
+
+	return {
+		"items": reports,
+		"total_count": total_count or 0,
+		"page": skip // limit + 1,
+		"page_size": limit
+	}

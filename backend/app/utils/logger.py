@@ -58,16 +58,23 @@ class JSONFormatter(logging.Formatter):
 		return json.dumps(log_record, ensure_ascii=False)
 
 # -------------------------------------------------------------------
+# JSON Formatter для метрик (Prometheus/Grafana)
+# -------------------------------------------------------------------
+class MetricsJSONFormatter(logging.Formatter):
+	def format(self, record):
+		log_record = {
+			"timestamp": self.formatTime(record, self.datefmt),
+			"level": record.levelname,
+			"metric": getattr(record, "metric", None),
+			"value": getattr(record, "value", None),
+			"symbol": getattr(record, "symbol", None),
+		}
+		return json.dumps(log_record, ensure_ascii=False)
+
+# -------------------------------------------------------------------
 # Настройка логирования
 # -------------------------------------------------------------------
 def setup_logger():
-	"""
-	Настройка логирования:
-	- Ротация логов (ежедневно)
-	- Разделение логов (общие, ошибки, сделки, Qdrant, ML)
-	- Расширенный формат (user_id, symbol, trade_id)
-	- Отправка CRITICAL ошибок в Telegram
-	"""
 	formatter = logging.Formatter(
 		"%(asctime)s | %(levelname)s | %(name)s | "
 		"user_id=%(user_id)s | symbol=%(symbol)s | trade_id=%(trade_id)s | %(message)s"
@@ -87,26 +94,37 @@ def setup_logger():
 	error_handler.setFormatter(formatter)
 	error_handler.setLevel(logging.ERROR)
 
-	# Лог сделок
+	# Лог сделок и PnL
 	trades_handler = TimedRotatingFileHandler(
 		os.path.join(LOG_DIR, "trades.log"), when="midnight", backupCount=7, encoding="utf-8"
 	)
-	trades_handler.setFormatter(formatter)
+	trades_handler.setFormatter(logging.Formatter(
+		"%(asctime)s | TRADE | symbol=%(symbol)s | side=%(side)s | entry=%(entry_price)s | exit=%(exit_price)s | pnl=%(profit_loss)s | sentiment=%(sentiment)s"
+	))
 	trades_handler.setLevel(logging.INFO)
 
-	# Лог ошибок Qdrant (JSON формат)
-	qdrant_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "qdrant.log"), when="midnight", backupCount=7, encoding="utf-8"
+	# Лог риска
+	risk_handler = TimedRotatingFileHandler(
+		os.path.join(LOG_DIR, "risk.log"), when="midnight", backupCount=7, encoding="utf-8"
 	)
-	qdrant_handler.setFormatter(JSONFormatter())
-	qdrant_handler.setLevel(logging.ERROR)
+	risk_handler.setFormatter(logging.Formatter(
+		"%(asctime)s | RISK | reason=%(reason)s | symbol=%(symbol)s | position_size=%(position_size)s | deposit=%(deposit)s"
+	))
+	risk_handler.setLevel(logging.WARNING)
 
-	# Лог ML моделей
-	ml_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "ml.log"), when="midnight", backupCount=7, encoding="utf-8"
+	# Лог брокера
+	broker_handler = TimedRotatingFileHandler(
+		os.path.join(LOG_DIR, "broker.log"), when="midnight", backupCount=7, encoding="utf-8"
 	)
-	ml_handler.setFormatter(formatter)
-	ml_handler.setLevel(logging.INFO)
+	broker_handler.setFormatter(logging.Formatter("%(asctime)s | BROKER | %(message)s"))
+	broker_handler.setLevel(logging.ERROR)
+
+	# Лог метрик (JSON для Prometheus)
+	metrics_handler = TimedRotatingFileHandler(
+		os.path.join(LOG_DIR, "metrics.log"), when="midnight", backupCount=7, encoding="utf-8"
+	)
+	metrics_handler.setFormatter(MetricsJSONFormatter())
+	metrics_handler.setLevel(logging.INFO)
 
 	# Telegram handler для CRITICAL ошибок
 	telegram_handler = TelegramHandler()
@@ -118,8 +136,9 @@ def setup_logger():
 	logger.addHandler(general_handler)
 	logger.addHandler(error_handler)
 	logger.addHandler(trades_handler)
-	logger.addHandler(qdrant_handler)
-	logger.addHandler(ml_handler)
+	logger.addHandler(risk_handler)
+	logger.addHandler(broker_handler)
+	logger.addHandler(metrics_handler)
 	logger.addHandler(telegram_handler)
 
 	return logger

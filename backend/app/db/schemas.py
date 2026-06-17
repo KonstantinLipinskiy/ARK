@@ -123,6 +123,7 @@ class UserORM(Base):
 	ml_models = relationship("MLModelORM", back_populates="user", cascade="all, delete-orphan")
 	refresh_tokens = relationship("RefreshTokenORM", back_populates="user", cascade="all, delete-orphan")
 
+
 class RiskLog(Base):
 	__tablename__ = "risk_logs"
 
@@ -131,7 +132,11 @@ class RiskLog(Base):
 	symbol = Column(String(20), nullable=True)
 	position_size = Column(Float, nullable=True)
 	deposit = Column(Float, nullable=True)
+	sentiment = Column(Float, nullable=True)       # 🔹 новое поле
+	profit_loss = Column(Float, nullable=True)     # 🔹 новое поле
+	expected_pnl = Column(Float, nullable=True)    # 🔹 новое поле
 	timestamp = Column(DateTime, server_default=func.now())
+
 
 class BacktestReport(Base):
 	__tablename__ = "backtest_reports"

@@ -261,7 +261,16 @@ class RiskService:
 			return True
 		return datetime.utcnow() - self.last_trade_time >= timedelta(seconds=cooldown)
 
-	async def _log_violation(self, reason: str, symbol: str, position_size: float, deposit: float):
+	async def _log_violation(
+		self,
+		reason: str,
+		symbol: str,
+		position_size: float,
+		deposit: float,
+		sentiment: float | None = None,
+		profit_loss: float | None = None,
+		expected_pnl: float | None = None
+	):
 		"""Запись нарушения риск-менеджмента в БД и лог."""
 		try:
 			violation = RiskLog(
@@ -273,9 +282,53 @@ class RiskService:
 			)
 			self.db_session.add(violation)
 			await self.db_session.commit()
-			logger.warning(f"⚠️ Risk violation: {reason} | {symbol} | pos={position_size:.4f} | dep={deposit}")
+
+			logger.warning(
+				f"⚠️ Risk violation: {reason} | {symbol} | pos={position_size:.4f} | dep={deposit} "
+				f"| sentiment={sentiment} | pnl={profit_loss} | expected_pnl={expected_pnl}",
+				extra={
+					"reason": reason,
+					"symbol": symbol,
+					"position_size": position_size,
+					"deposit": deposit,
+					"sentiment": sentiment,
+					"profit_loss": profit_loss,
+					"expected_pnl": expected_pnl
+				}
+			)
 		except Exception as e:
 			logger.error(f"❌ Failed to log violation: {e}")
+
+
+	async def _safe_publish(self, message: dict):
+		"""
+		Безопасная публикация сообщения в брокер с retry‑механизмом.
+		Параметры retries и base_delay берутся из settings.py
+		"""
+		retries = settings.BROKER_RETRIES
+		base_delay = settings.BROKER_BASE_DELAY
+
+		for attempt in range(retries + 1):
+			try:
+				await self.broker.publish_telegram(message)
+				logger.info(
+					"Broker publish succeeded",
+					extra={"message_type": message.get("type"), "attempt": attempt + 1}
+				)
+				return True
+			except Exception as e:
+				if attempt < retries:
+					delay = base_delay * (2 ** attempt)  # экспоненциальная задержка: 1s → 2s → 4s
+					logger.error(
+						f"Broker publish failed (attempt {attempt+1}/{retries}): {e} | retry in {delay}s"
+					)
+					await asyncio.sleep(delay)
+				else:
+					logger.critical(
+						f"Broker publish retry failed after {retries+1} attempts: {e}"
+					)
+					return False
+
 
 	async def validate_trade(
 		self,
@@ -287,7 +340,7 @@ class RiskService:
 		total_loss_pct: float,
 		strength: float = 1.0,
 		user_id: int | None = None
-		) -> bool:
+	) -> bool:
 		"""Унифицированная проверка всех условий риска и стратегии."""
 		try:
 			# ✅ проверка, что конфиги загружены
@@ -306,8 +359,8 @@ class RiskService:
 
 			# --- Проверка дневного лимита ---
 			if not self.check_daily_loss(total_loss_pct, risk_config):
-				await self._log_violation("Daily loss limit exceeded", symbol, position_size, deposit)
-				await self.broker.publish_telegram({
+				await self._log_violation("Daily loss limit exceeded", symbol, position_size, deposit, expected_pnl=None)
+				await self._safe_publish({
 					"type": "risk_violation",
 					"user_id": user_id,
 					"reason": "Daily loss limit exceeded",
@@ -319,8 +372,8 @@ class RiskService:
 
 			# --- Проверка количества сделок ---
 			if not self.check_open_trades(open_trades, risk_config):
-				await self._log_violation("Too many open trades", symbol, position_size, deposit)
-				await self.broker.publish_telegram({
+				await self._log_violation("Too many open trades", symbol, position_size, deposit, expected_pnl=None)
+				await self._safe_publish({
 					"type": "risk_violation",
 					"user_id": user_id,
 					"reason": "Too many open trades",
@@ -332,8 +385,8 @@ class RiskService:
 
 			# --- Проверка cooldown ---
 			if not self.check_cooldown(risk_config):
-				await self._log_violation("Cooldown between trades not respected", symbol, position_size, deposit)
-				await self.broker.publish_telegram({
+				await self._log_violation("Cooldown between trades not respected", symbol, position_size, deposit, expected_pnl=None)
+				await self._safe_publish({
 					"type": "risk_violation",
 					"user_id": user_id,
 					"reason": "Cooldown not respected",
@@ -371,10 +424,10 @@ class RiskService:
 			sentiment_long = strategy.get("sentiment_long_threshold", -0.5)
 			sentiment_short = strategy.get("sentiment_short_threshold", 0.5)
 			if direction == "long" and last_sentiment is not None and last_sentiment < sentiment_long:
-				await self._log_violation("Sentiment blocks long entry", symbol, position_size, deposit)
+				await self._log_violation("Sentiment blocks long entry", symbol, position_size, deposit, sentiment=last_sentiment, expected_pnl=None)
 				return False
 			if direction == "short" and last_sentiment is not None and last_sentiment > sentiment_short:
-				await self._log_violation("Sentiment blocks short entry", symbol, position_size, deposit)
+				await self._log_violation("Sentiment blocks short entry", symbol, position_size, deposit, sentiment=last_sentiment, expected_pnl=None)
 				return False
 
 			# --- Проверка Risk/Reward ---
@@ -390,21 +443,40 @@ class RiskService:
 			weighted_tp = sum(tp * w for tp, w in zip(tp_targets, tp_distribution))
 			potential_profit = entry_price * weighted_tp
 
+			expected_pnl = potential_profit - potential_loss  # ✅ расчёт
+
 			if potential_profit / potential_loss < rr_ratio:
-				await self._log_violation("Risk/Reward ratio too low", symbol, position_size, deposit)
-				await self.broker.publish_telegram({
+				await self._log_violation("Risk/Reward ratio too low", symbol, position_size, deposit, sentiment=last_sentiment, expected_pnl=expected_pnl)
+				await self._safe_publish({
 					"type": "risk_violation",
 					"user_id": user_id,
 					"reason": "Risk/Reward ratio too low",
 					"symbol": symbol,
 					"position_size": position_size,
-					"deposit": deposit
+					"deposit": deposit,
+					"expected_pnl": expected_pnl
 				})
 				return False
 
 			# --- Успешная валидация ---
 			self.last_trade_time = datetime.utcnow()
-			await self.broker.publish_telegram({
+			logger.info(
+				f"✅ Trade validated | {symbol} | entry={entry_price} | stop_loss={stop_loss_pct} | tp={tp_targets} "
+				f"| pos={position_size:.4f} | dep={deposit} | sentiment={last_sentiment} | expected_pnl={expected_pnl:.4f}",
+				extra={
+					"symbol": symbol,
+					"entry_price": entry_price,
+					"stop_loss": stop_loss_pct,
+					"take_profit": tp_targets,
+					"position_size": position_size,
+					"deposit": deposit,
+					"sentiment": last_sentiment,
+					"confidence_score": strength,
+					"expected_pnl": expected_pnl
+				}
+			)
+
+			await self._safe_publish({
 				"type": "trade",
 				"user_id": user_id,
 				"trade": {
@@ -414,14 +486,22 @@ class RiskService:
 					"stop_loss": stop_loss_pct,
 					"take_profit": tp_targets,
 					"leverage": risk_config.get("max_leverage", 1),
-					"confidence_score": strength
+					"confidence_score": strength,
+					"expected_pnl": expected_pnl
 				}
 			})
+
+			# --- Отправка метрик в Prometheus/Grafana ---
+			logger.info("Metrics collected", extra={"metric": "sharpe", "value": strategy.get("sharpe", 0), "symbol": symbol})
+			logger.info("Metrics collected", extra={"metric": "winrate", "value": strategy.get("winrate", 0), "symbol": symbol})
+			logger.info("Metrics collected", extra={"metric": "drawdown", "value": strategy.get("max_drawdown", 0), "symbol": symbol})
+			logger.info("Metrics collected", extra={"metric": "expected_pnl", "value": expected_pnl, "symbol": symbol})
+
 			return True
 
 		except Exception as e:
 			logger.error(f"❌ Risk validation error: {e}")
-			await self.broker.publish_telegram({
+			await self._safe_publish({
 				"type": "error",
 				"user_id": user_id,
 				"error": f"Risk validation error: {e}"
