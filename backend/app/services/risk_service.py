@@ -129,3 +129,22 @@ async def validate_trade(symbol: str, deposit: float, entry_price: float,
 		return False
 
 	return True
+
+# --- Универсальная валидация сигнала ---
+def validate_signal(signal: dict) -> tuple[bool, str]:
+	"""
+	Проверка торгового сигнала на соответствие бизнес-правилам.
+	Возвращает (is_valid, message).
+	"""
+	action = signal.get("action", "").lower()
+	strength = signal.get("strength", 0.0)
+	test_flag = signal.get("test", False)
+
+	if action not in ["buy", "sell"]:
+		return False, "⚠️ Сигнал проигнорирован (неключевой)"
+	if strength < settings.MIN_SIGNAL_STRENGTH:
+		return False, f"⚠️ Сигнал проигнорирован (слабый strength={strength:.2f})"
+	if test_flag and not settings.ALLOW_TEST_SIGNALS:
+		return False, "⚠️ Сигнал проигнорирован (тестовый)"
+
+	return True, "✅ Ключевой сигнал принят"

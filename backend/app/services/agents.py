@@ -1,68 +1,69 @@
 # app/services/agents.py
 from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI, HuggingFaceHub
+from langchain_openai import OpenAI
+from langchain_huggingface import HuggingFaceHub
+from langchain_community.llms import LlamaCpp
+from langchain_community.memory import ConversationBufferMemory
 
 from app.services.reports import ReportsService
 from app.db.vector import VectorDB
 from app.utils.metrics import calculate_metrics, ml_accuracy, ml_loss, ml_precision, ml_recall
-from app.config import RISK_CONFIG
+from app.config import settings
 from app.services.orders import OrdersService
 from app.utils.logger import logger
 
-# 🔹 Дополнительно можно подключить локальные модели (пример)
-try:
-	from langchain.llms import LlamaCpp
-except ImportError:
-	LlamaCpp = None
 
 class AgentsService:
-	def __init__(
-		self,
-		llm_provider: str = "openai",
-		temperature: float = 0.0,
-		top_p: float = 1.0,
-		max_tokens: int = 512,
-		model_name: str | None = None
-	):
+	def __init__(self):
 		"""
 		Инициализация LLM с гибкостью выбора провайдера.
-		llm_provider: "openai", "huggingface", "llama", "mistral"
+		Все параметры берутся из config.py (.env).
 		"""
 		self.llm = None
+		provider = settings.LLM_PROVIDER.lower()
+		model_name = settings.LLM_MODEL_NAME
+		model_path = settings.LLM_MODEL_PATH
+		temperature = settings.LLM_TEMPERATURE
+		top_p = settings.LLM_TOP_P
+		max_tokens = settings.LLM_MAX_TOKENS
 
-		if llm_provider == "openai":
-			self.llm = OpenAI(
-				temperature=temperature,
-				max_tokens=max_tokens,
-				top_p=top_p
-			)
-		elif llm_provider == "huggingface":
-			self.llm = HuggingFaceHub(
-				repo_id=model_name or "google/flan-t5-large",
-				model_kwargs={
-					"temperature": temperature,
-					"top_p": top_p,
-					"max_length": max_tokens
-				}
-			)
-		elif llm_provider == "llama" and LlamaCpp:
-			self.llm = LlamaCpp(
-				model_path=model_name or "./models/llama-7b.ggmlv3.q4_0.bin",
-				temperature=temperature,
-				top_p=top_p,
-				max_tokens=max_tokens
-			)
-		elif llm_provider == "mistral":
-			self.llm = HuggingFaceHub(
-				repo_id=model_name or "mistralai/Mistral-7B-v0.1",
-				model_kwargs={
-					"temperature": temperature,
-					"top_p": top_p,
-					"max_length": max_tokens
-				}
-			)
-		else:
-			raise ValueError(f"Неизвестный провайдер LLM: {llm_provider}")
+		try:
+			if provider == "openai":
+				self.llm = OpenAI(
+					temperature=temperature,
+					max_tokens=max_tokens,
+					top_p=top_p
+				)
+			elif provider == "huggingface":
+				self.llm = HuggingFaceHub(
+					repo_id=model_name,
+					model_kwargs={
+						"temperature": temperature,
+						"top_p": top_p,
+						"max_length": max_tokens
+					}
+				)
+			elif provider == "llama":
+				self.llm = LlamaCpp(
+					model_path=model_path,
+					temperature=temperature,
+					top_p=top_p,
+					max_tokens=max_tokens
+				)
+			elif provider == "mistral":
+				self.llm = HuggingFaceHub(
+					repo_id=model_name,
+					model_kwargs={
+						"temperature": temperature,
+						"top_p": top_p,
+						"max_length": max_tokens
+					}
+				)
+			else:
+				raise ValueError(f"Неизвестный провайдер LLM: {provider}")
+		except Exception as e:
+			logger.error(f"Ошибка инициализации LLM ({provider}): {e}")
+			raise
 
 		# Инициализация вспомогательных сервисов
 		self.vector = VectorDB()
@@ -108,21 +109,20 @@ class AgentsService:
 			)
 		]
 
+		# Подключаем память агента
+		memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
 		# Инициализация агента
 		self.agent = initialize_agent(
 			tools=self.tools,
 			llm=self.llm,
 			agent="zero-shot-react-description",
-			verbose=True
+			verbose=True,
+			memory=memory
 		)
 
-    # --- Инструменты ---
+	# --- Инструменты ---
 	def analyze_signal(self, signal: dict) -> str:
-		"""
-		🔹 Бизнес-логика отбора сигналов:
-		- сохраняем только ключевые сигналы (buy/sell)
-		- игнорируем слабые или тестовые
-		"""
 		action = signal.get("action", "").lower()
 		strength = signal.get("strength", 0)
 		test_flag = signal.get("test", False)
@@ -130,14 +130,13 @@ class AgentsService:
 		if action not in ["buy", "sell"]:
 			logger.info(f"Сигнал проигнорирован: неключевой action={action}")
 			return "⚠️ Сигнал проигнорирован (неключевой)"
-		if strength < 0.5:
+		if strength < settings.MIN_SIGNAL_STRENGTH:
 			logger.info(f"Сигнал проигнорирован: слабая сила={strength}")
 			return "⚠️ Сигнал проигнорирован (слабый)"
-		if test_flag:
+		if test_flag and not settings.ALLOW_TEST_SIGNALS:
 			logger.info("Сигнал проигнорирован: тестовый")
 			return "⚠️ Сигнал проигнорирован (тестовый)"
 
-		# Если сигнал прошёл фильтрацию
 		logger.info(f"Сигнал принят: {signal}")
 		return f"✅ Ключевой сигнал принят: {signal}"
 
@@ -145,7 +144,7 @@ class AgentsService:
 		return self.reports.generate_rag_report(trades)
 
 	def check_risk(self, trade: dict) -> str:
-		max_loss = RISK_CONFIG.get("max_loss_per_trade", 0)
+		max_loss = settings.MAX_LOSS_PER_TRADE
 		if trade.get("loss", 0) > max_loss:
 			return f"❌ Риск превышен: убыток {trade['loss']} > {max_loss}"
 		return "✅ Риск в пределах лимита"

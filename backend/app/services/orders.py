@@ -74,7 +74,7 @@ async def create_order(symbol: str, side: str, amount: float = None,
 			return {"error": "Signal confidence too low"}
 
 		deposit = await get_balance("USDT")
-		stop_loss_pct = 0.02  # берём из стратегии, можно расширить
+		stop_loss_pct = 0.02
 		total_loss_pct = 0.01
 
 		position_size = await calculate_position_size(
@@ -218,7 +218,7 @@ async def create_oco_order(symbol: str, side: str, amount: float = None,
 							db_session: AsyncSession = None, broker: RabbitMQBroker = None):
 	try:
 		exchange = get_exchange()
-		params = {"type": "oco", "price": price, "stopPrice": stop_price}  # TODO: проверить совместимость с конкретной биржей
+		params = {"type": "oco", "price": price, "stopPrice": stop_price}
 
 		features = await build_features(symbol, price or 1.0, db_session)
 		prediction = ml_service.predict_with_confidence(features)
@@ -257,12 +257,12 @@ async def create_oco_order(symbol: str, side: str, amount: float = None,
 			strength=signal_strength
 		)
 		if not valid:
-			await broker.publish_telegram({
-				"type": "risk_violation",
-				"trade": {"pair": symbol, "side": side},
-				"reason": "Risk validation failed"
-			})
-			return {"error": "Risk validation failed"}
+					await broker.publish_telegram({
+			"type": "risk_violation",
+			"trade": {"pair": symbol, "side": side},
+			"reason": "Risk validation failed"
+		})
+		return {"error": "Risk validation failed"}
 
 		order = await exchange.create_order(symbol, "limit", side, amount, price, params)
 
@@ -295,3 +295,51 @@ async def create_oco_order(symbol: str, side: str, amount: float = None,
 		return order
 	except Exception as e:
 		return await handle_order_error("OCO order", e, broker)
+
+
+# --- Orders Service Class ---
+class OrdersService:
+	"""
+	Обёртка над функциями создания ордеров.
+	Используется агентом для унифицированного интерфейса.
+	"""
+	def __init__(self, db_session: AsyncSession = None, broker: RabbitMQBroker = None):
+		self.db_session = db_session
+		self.broker = broker
+
+	async def place_order(self, symbol: str, side: str, amount: float = None,
+							order_type: str = "market", price: float = None, stop_price: float = None):
+		return await create_order(
+			symbol=symbol,
+			side=side,
+			amount=amount,
+			order_type=order_type,
+			price=price,
+			stop_price=stop_price,
+			db_session=self.db_session,
+			broker=self.broker
+		)
+
+	async def place_stop_order(self, symbol: str, side: str, amount: float = None,
+								stop_price: float = None, order_type: str = "stop_market"):
+		return await create_stop_order(
+			symbol=symbol,
+			side=side,
+			amount=amount,
+			stop_price=stop_price,
+			order_type=order_type,
+			db_session=self.db_session,
+			broker=self.broker
+		)
+
+	async def place_oco_order(self, symbol: str, side: str, amount: float = None,
+								price: float = None, stop_price: float = None):
+		return await create_oco_order(
+			symbol=symbol,
+			side=side,
+			amount=amount,
+			price=price,
+			stop_price=stop_price,
+			db_session=self.db_session,
+			broker=self.broker
+		)

@@ -108,6 +108,31 @@ ml_loss = Gauge("ml_training_loss", "Loss of ML training")
 ml_precision = Gauge("ml_training_precision", "Precision of ML training")
 ml_recall = Gauge("ml_training_recall", "Recall of ML training")
 
+# --- API методы для доступа к ML метрикам ---
+def get_accuracy() -> float:
+	try:
+		return ml_accuracy._value.get() or 0.0
+	except Exception:
+		return 0.0
+
+def get_loss() -> float:
+	try:
+		return ml_loss._value.get() or 0.0
+	except Exception:
+		return 0.0
+
+def get_precision() -> float:
+	try:
+		return ml_precision._value.get() or 0.0
+	except Exception:
+		return 0.0
+
+def get_recall() -> float:
+	try:
+		return ml_recall._value.get() or 0.0
+	except Exception:
+		return 0.0
+
 # --- Agent Metrics (Prometheus) ---
 AGENT_REQUESTS = Counter("agent_requests_total", "Количество запросов к агентам")
 AGENT_ERRORS = Counter("agent_errors_total", "Количество ошибок агентов")
@@ -217,7 +242,6 @@ def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[floa
 	"""
 	try:
 		ml_training_runs_total.inc()
-		# Дополнительно можно логировать ключевые метрики
 		if "accuracy" in metrics and metrics["accuracy"] is not None:
 			ml_accuracy.set(metrics["accuracy"])
 		if "loss" in metrics and metrics["loss"] is not None:
@@ -229,15 +253,15 @@ def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[floa
 	except Exception as e:
 		print(f"❌ Ошибка логирования обучения: {e}")
 
-def log_prediction(features: Dict[str, float], result: Dict[str, float], confidence: float):
-	"""
-	Логирование предсказания модели.
-	features: входные признаки
-	result: словарь с результатами предсказания (например, success_probability)
-	confidence: confidence score
-	"""
-	try:
-		ml_predictions_total.inc()
-		ml_prediction_confidence.observe(confidence)
-	except Exception as e:
-		print(f"❌ Ошибка логирования предсказания: {e}")
+	def log_prediction(features: Dict[str, float], result: Dict[str, float], confidence: float):
+		"""
+		Логирование предсказания модели.
+		features: входные признаки
+		result: словарь с результатами предсказания (например, success_probability)
+		confidence: confidence score
+		"""
+		try:
+			ml_predictions_total.inc()
+			ml_prediction_confidence.observe(confidence)
+		except Exception as e:
+			print(f"❌ Ошибка логирования предсказания: {e}")

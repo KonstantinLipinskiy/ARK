@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
 	# --- Exchange Config ---
 	EXCHANGE_CONFIG: ClassVar[dict] = {
-		"name": "bybit",
+		"name": os.getenv("EXCHANGE_NAME", "bybit"),
 		"api_key": os.getenv("API_KEY"),
 		"api_secret": os.getenv("API_SECRET"),
 		"mode": "testnet" if os.getenv("USE_TESTNET", "false").lower() == "true" else "mainnet",
@@ -82,6 +82,21 @@ class Settings(BaseSettings):
 	DEBUG_EXPORT: bool = os.getenv("DEBUG_EXPORT", "False").lower() in ("true", "1", "yes")
 	EXPORT_FILENAME: str = os.getenv("EXPORT_FILENAME", "backtest_summary.xlsx")
 
+	# --- LLM Config ---
+	LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")  # openai / huggingface / llama / mistral
+	LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "google/flan-t5-large")
+	LLM_MODEL_PATH: str = os.getenv("LLM_MODEL_PATH", "./models/llama-7b.ggmlv3.q4_0.bin")
+	LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", 0.0))
+	LLM_TOP_P: float = float(os.getenv("LLM_TOP_P", 1.0))
+	LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", 512))
+
+	# --- Business Rules ---
+	MIN_SIGNAL_STRENGTH: float = float(os.getenv("MIN_SIGNAL_STRENGTH", 0.5))
+	MAX_LOSS_PER_TRADE: float = float(os.getenv("MAX_LOSS_PER_TRADE", 100.0))
+	MAX_TOTAL_LOSS: float = float(os.getenv("MAX_TOTAL_LOSS", 500.0))
+	ALLOW_TEST_SIGNALS: bool = os.getenv("ALLOW_TEST_SIGNALS", "False").lower() in ("true", "1", "yes")
+
+
 settings = Settings()
 
 # --- RabbitMQ ---
@@ -98,6 +113,7 @@ REDIS_CONFIG = {
 	"port": int(os.getenv("REDIS_PORT", 6379)),
 	"db": int(os.getenv("REDIS_DB", 0)),
 }
+
 
 
 
