@@ -7,12 +7,13 @@ from sqlalchemy import select
 
 from app.utils.logger import logger
 from app.db.schemas import TradeORM, SignalORM, UserORM, RiskLog
-from app.services.rabbitmq import RabbitMQBroker
+from app.broker.rabbitmq import RabbitMQBroker
 from app.utils.metrics import calculate_metrics
 from app.config import Settings
 from app.db.session import get_session
 from app.services.exchange import load_strategies
 from app.services.risk import RiskService
+from app.services.reports import ReportsService   # 🔹 добавлено
 
 settings = Settings()
 bot = Bot(token=settings.TELEGRAM_TOKEN)
@@ -21,6 +22,7 @@ dp = Dispatcher()
 class TelegramService:
 	def __init__(self, bot: Bot):
 		self.bot = bot
+		self.reports_service = ReportsService()   # 🔹 используем ReportsService
 
 	async def send_message_to_user(self, user: UserORM, text: str):
 		"""Отправка сообщения конкретному пользователю по его telegram_id."""
@@ -30,77 +32,83 @@ class TelegramService:
 		if user.settings and not user.settings.get("notifications_enabled", True):
 			logger.info(f"🔕 Уведомления отключены для пользователя {user.username}")
 			return
-		await self.bot.send_message(chat_id=user.telegram_id, text=text)
+		try:
+			await self.bot.send_message(chat_id=user.telegram_id, text=text)
+		except Exception as e:
+			logger.error(f"Ошибка отправки сообщения пользователю {user.username}: {e}")
 
 	async def send_message_by_id(self, telegram_id: str, text: str):
 		"""Отправка сообщения по telegram_id напрямую (используется в TelegramHandler)."""
 		if not telegram_id:
 			logger.error("❌ ADMIN_TELEGRAM_ID не задан, невозможно отправить сообщение")
 			return
-		await self.bot.send_message(chat_id=telegram_id, text=text)
+		try:
+			await self.bot.send_message(chat_id=telegram_id, text=text)
+		except Exception as e:
+			logger.error(f"Ошибка отправки сообщения по telegram_id={telegram_id}: {e}")
 
 	async def send_trade_notification(self, trade: dict, user_id: int | None = None):
 		"""Уведомление о сделке с расширенным форматом (PnL, SL, TP)."""
 		async with get_session() as session:
 			if user_id:
-					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
-					user = result.scalars().first()
-					if user:
-						msg = (
-							f"💹 Сделка: {trade.get('symbol', 'N/A')} {trade.get('side', '-')}\n"
-							f"Статус: {trade.get('status', '-')}\n"
-							f"Вход: {trade.get('entry_price', '-')}\n"
-							f"Выход: {trade.get('exit_price', '-')}\n"
-							f"PnL: {trade.get('profit_loss', '-')}\n"
-							f"Стоп-лосс: {trade.get('stop_loss', '-')}\n"
-							f"Тейк-профит: {trade.get('take_profit', '-')}\n"
-							f"Leverage: {trade.get('leverage', '-')}\n"
-							f"Confidence: {trade.get('confidence_score', '-')}\n"
-							f"Риск: {trade.get('risk_reason', '-')}"
-						)
-						await self.send_message_to_user(user, msg)
-						logger.info(f"📤 Уведомление о сделке отправлено пользователю {user.username}")
+				result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+				user = result.scalars().first()
+				if user:
+					msg = (
+						f"💹 Сделка: {trade.get('symbol', 'N/A')} {trade.get('side', '-')}\n"
+						f"Статус: {trade.get('status', '-')}\n"
+						f"Вход: {trade.get('entry_price', '-')}\n"
+						f"Выход: {trade.get('exit_price', '-')}\n"
+						f"PnL: {trade.get('profit_loss', '-')}\n"
+						f"Стоп-лосс: {trade.get('stop_loss', '-')}\n"
+						f"Тейк-профит: {trade.get('take_profit', '-')}\n"
+						f"Leverage: {trade.get('leverage', '-')}\n"
+						f"Confidence: {trade.get('confidence_score', '-')}\n"
+						f"Риск: {trade.get('risk_reason', '-')}"
+					)
+					await self.send_message_to_user(user, msg)
+					logger.info(f"📤 Уведомление о сделке отправлено пользователю {user.username}")
 
 	async def send_signal_notification(self, signal: dict, user_id: int | None = None):
 		"""Уведомление о новом сигнале."""
 		async with get_session() as session:
 			if user_id:
-					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
-					user = result.scalars().first()
-					if user:
-						msg = (
-							f"📈 Новый сигнал: {signal.get('symbol', 'N/A')} {signal.get('direction', '-')}\n"
-							f"Индикатор: {signal.get('indicator', '-')}\n"
-							f"Сила: {signal.get('strength', '-')}\n"
-							f"Confidence: {signal.get('confidence', '-')}\n"
-							f"Источник: {signal.get('source', '-')}\n"
-							f"Время: {signal.get('timestamp', '-')}"
-						)
-						await self.send_message_to_user(user, msg)
-						logger.info(f"📤 Уведомление о сигнале отправлено пользователю {user.username}")
+				result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+				user = result.scalars().first()
+				if user:
+					msg = (
+						f"📈 Новый сигнал: {signal.get('symbol', 'N/A')} {signal.get('direction', '-')}\n"
+						f"Индикатор: {signal.get('indicator', '-')}\n"
+						f"Сила: {signal.get('strength', '-')}\n"
+						f"Confidence: {signal.get('confidence', '-')}\n"
+						f"Источник: {signal.get('source', '-')}\n"
+						f"Время: {signal.get('timestamp', '-')}"
+					)
+					await self.send_message_to_user(user, msg)
+					logger.info(f"📤 Уведомление о сигнале отправлено пользователю {user.username}")
 
 	async def send_error(self, error: str, user_id: int | None = None,
-								symbol: str = "-", position_size: float = 0.0, deposit: float = 0.0):
+							symbol: str = "-", position_size: float = 0.0, deposit: float = 0.0):
 		"""Уведомление об ошибке."""
 		async with get_session() as session:
 			if user_id:
-					result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
-					user = result.scalars().first()
-					if user:
-						msg = (
-							f"❌ Ошибка: {error}\n"
-							f"Символ: {symbol}\n"
-							f"Размер позиции: {position_size:.4f}\n"
-							f"Депозит: {deposit:.2f}"
-						)
-						await self.send_message_to_user(user, msg)
+				result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+				user = result.scalars().first()
+				if user:
+					msg = (
+						f"❌ Ошибка: {error}\n"
+						f"Символ: {symbol}\n"
+						f"Размер позиции: {position_size:.4f}\n"
+						f"Депозит: {deposit:.2f}"
+					)
+					await self.send_message_to_user(user, msg)
 
 	async def send_order_cancelled(self, user: UserORM, symbol: str, order_id: str, reason: str = "Cancelled"):
 		msg = f"❌ Ордер отменён: {symbol}, id={order_id}, причина: {reason}"
 		await self.send_message_to_user(user, msg)
 
 	async def send_position_closed(self, user: UserORM, symbol: str, amount: float, side: str, exit_price: float,
-											stop_loss: float | None = None, risk: float | None = None):
+									stop_loss: float | None = None, risk: float | None = None):
 		msg = (
 			f"📉 Позиция закрыта: {symbol} {amount} {side} @ {exit_price}\n"
 			f"Стоп-лосс: {stop_loss if stop_loss else '-'}\n"
@@ -118,13 +126,14 @@ class TelegramService:
 		await self.send_message_to_user(user, msg)
 		logger.info(f"📤 Уведомление о блокировке отправлено пользователю {user.username}")
 
-	async def send_strategy_updated(self, strategy: dict):
+	async def send_strategy_updated(self, strategy: dict, admin_id: str | None = None):
 		msg = (
 			f"⚙️ Стратегия обновлена: {strategy.get('symbol', '-')}\n"
 			f"Параметры: {strategy}"
 		)
+		if admin_id:
+			await self.send_message_by_id(admin_id, msg)
 		logger.info(f"📤 Уведомление об изменении стратегии: {strategy.get('symbol', '-')}")
-
 
 telegram_service = TelegramService(bot)
 broker = RabbitMQBroker()
@@ -166,8 +175,8 @@ async def status_command(message: types.Message):
 		trades = result.scalars().all()
 		if trades:
 			msg = "\n".join([
-					f"{t.symbol} {t.side} {t.amount} @ {t.price} (Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
-					for t in trades
+				f"{t.symbol} {t.side} {t.amount} @ {t.price} (Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
+				for t in trades
 			])
 			await message.answer(f"📌 Активные позиции:\n{msg}")
 		else:
@@ -182,9 +191,9 @@ async def trades_command(message: types.Message):
 		trades = result.scalars().all()
 		if trades:
 			msg = "\n".join([
-					f"{t.symbol} {t.side} {t.amount} @ {t.price} "
-					f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
-					for t in trades
+				f"{t.symbol} {t.side} {t.amount} @ {t.price} "
+				f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
+				for t in trades
 			])
 			await message.answer(f"📊 Последние сделки:\n{msg}")
 		else:
@@ -197,20 +206,11 @@ async def report_command(message: types.Message):
 	async with get_session() as session:
 		result = await session.execute(select(TradeORM))
 		trades = result.scalars().all()
-		metrics = calculate_metrics(trades)
-		msg = (
-			f"📊 Отчёт по стратегиям:\n"
-			f"Всего сделок: {metrics['trades_count']}\n"
-			f"Winrate: {metrics['winrate']:.2%}\n"
-			f"Profit: {metrics['total_profit']:.2f}\n"
-			f"Drawdown: {metrics['max_drawdown']:.2f}\n"
-			f"Sharpe: {metrics['sharpe_ratio']:.2f}\n"
-			f"Sortino: {metrics['sortino_ratio']:.2f}\n"
-			f"Profit Factor: {metrics['profit_factor']:.2f}\n"
-			f"Макс. серия побед: {metrics['max_consecutive_wins']}\n"
-			f"Макс. серия поражений: {metrics['max_consecutive_losses']}"
+		# 🔹 Используем ReportsService для единообразия
+		report_text = telegram_service.reports_service.generate_rag_report(
+			[t.__dict__ for t in trades], output_format="markdown"
 		)
-		await message.answer(msg)
+		await message.answer(report_text)
 
 @dp.message(Command("config"))
 async def config_command(message: types.Message):
@@ -247,3 +247,22 @@ async def risk_command(message: types.Message):
 			f"Strength Multiplier: {limits.get('strength_multiplier', '-')}"
 		)
 		await message.answer(msg)
+
+@dp.message(Command("help"))
+async def help_command(message: types.Message):
+	"""
+	Команда /help: выводит список всех доступных команд Telegram‑бота.
+	"""
+	if not await is_authorized(message):
+		return
+	help_text = (
+		"📖 Список доступных команд:\n\n"
+		"/start – приветственное сообщение и активация бота\n"
+		"/status – показать активные позиции\n"
+		"/trades – последние сделки\n"
+		"/report – сформировать RAG‑отчёт по сделкам (markdown)\n"
+		"/config – текущие настройки стратегии (только админ)\n"
+		"/risk – лимиты риск‑менеджмента (только админ)\n"
+		"/help – список команд и описание"
+	)
+	await message.answer(help_text)
