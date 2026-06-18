@@ -165,6 +165,18 @@ async def log_critical_error(message: str, **kwargs):
 		logger.error(f"Failed to send Telegram alert: {e}")
 
 # -------------------------------------------------------------------
+# Централизованное логирование событий
+# -------------------------------------------------------------------
+def log_order_error(context: str, error: Exception, **kwargs):
+	logger.error(f"❌ {context} error: {error}", extra=kwargs)
+
+def log_risk_violation(symbol: str, reason: str, **kwargs):
+	logger.warning(f"⚠️ Risk violation: {reason} | symbol={symbol}", extra=kwargs)
+
+def log_signal_rejected(symbol: str, confidence: float, **kwargs):
+	logger.info(f"🚫 Signal rejected: {symbol} | confidence={confidence:.2f}", extra=kwargs)
+
+# -------------------------------------------------------------------
 # Логирование загрузки ML модели
 # -------------------------------------------------------------------
 def log_model_load(model_type: str, path: str, params: dict):

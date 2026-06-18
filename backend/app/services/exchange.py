@@ -11,7 +11,6 @@ from app.services.risk import RiskService
 from app.services.telegram import TelegramService
 from app.db.schemas import TradeORM, StrategyORM, OHLCVHourly
 
-
 # --- INIT ---
 def get_exchange():
 	"""
@@ -162,6 +161,71 @@ async def create_order(
 		logger.error(f"❌ Order error: {msg}")
 		if telegram:
 			await telegram.send_message(f"❌ Order failed: {msg}")
+		return {"error": msg}
+
+# --- CREATE OCO ORDER ---
+async def create_oco_order(
+	symbol: str,
+	side: str,
+	amount: float,
+	price: float,
+	stop_price: float,
+	risk_service: RiskService = None,
+	telegram: TelegramService = None
+):
+	"""
+	Создать OCO ордер (One-Cancels-the-Other).
+	Для Binance используется встроенный тип "oco".
+	Для Bybit эмулируется через два ордера (TP + SL).
+	"""
+	try:
+		exchange = get_exchange()
+		exchange_name = settings.EXCHANGE_CONFIG["name"].lower()
+		trading_mode = settings.TRADING_MODE
+
+		if "binance" in exchange_name:
+			params = {"type": "oco", "price": price, "stopPrice": stop_price}
+			if trading_mode == "futures":
+				params.update({"reduceOnly": False, "marginType": "isolated"})
+			order = await exchange.create_order(symbol, "limit", side, amount, price, params)
+
+		elif "bybit" in exchange_name:
+			tp_params = {"reduceOnly": False, "takeProfitPrice": price}
+			sl_params = {"reduceOnly": False, "stopPrice": stop_price}
+
+			tp_order = await exchange.create_order(symbol, side, "takeProfit", amount, params=tp_params)
+			sl_order = await exchange.create_order(symbol, side, "stopMarket", amount, params=sl_params)
+
+			order = {"tp_order": tp_order, "sl_order": sl_order}
+
+		else:
+			raise Exception(f"OCO orders are not supported for {exchange_name}")
+
+		if risk_service:
+			trade = TradeORM(
+				symbol=symbol,
+				side=side,
+				amount=amount,
+				price=price,
+				stop_loss=stop_price,
+				take_profit=price,
+				status="open",
+				exchange_order_id=order.get("id") if isinstance(order, dict) else None
+			)
+			risk_service.db_session.add(trade)
+			await risk_service.db_session.commit()
+
+		if telegram:
+			await telegram.send_message(
+				f"✅ OCO order created: {symbol} {side} amount={amount}, TP={price}, SL={stop_price}"
+			)
+
+		return order
+	except Exception as e:
+		msg = format_ccxt_error(e)
+		logger.error(f"❌ OCO order error: {msg}")
+		if telegram:
+			await telegram.send_message(f"❌ OCO order failed: {msg}")
 		return {"error": msg}
 
 # --- CANCEL ORDER ---

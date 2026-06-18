@@ -61,13 +61,17 @@ class Settings(BaseSettings):
 	ML_USE_CV: bool = os.getenv("ML_USE_CV", "True").lower() in ("true", "1", "yes")
 	ML_CV_SPLITS: int = int(os.getenv("ML_CV_SPLITS", 5))
 
+	# --- ML Model Config ---
 	MODEL_TYPE: str = os.getenv("MODEL_TYPE", "sklearn")
 	MODEL_PATH: str = os.getenv("MODEL_PATH", "models/sklearn_model.pkl")
+	CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", 0.2))
+	SIGNAL_MULTIPLIER: float = float(os.getenv("SIGNAL_MULTIPLIER", 2.0))
+	AMOUNT_FACTOR: float = float(os.getenv("AMOUNT_FACTOR", 0.5))
 
+	# --- Trading Defaults ---
 	DEFAULT_DEPOSIT: float = float(os.getenv("DEFAULT_DEPOSIT", 1000))
 	COMMISSION_RATE: float = float(os.getenv("COMMISSION_RATE", 0.001))
 	SLIPPAGE_TOLERANCE: float = float(os.getenv("SLIPPAGE_TOLERANCE", 0.0005))
-	SIGNAL_STRENGTH_MULTIPLIER: float = float(os.getenv("SIGNAL_STRENGTH_MULTIPLIER", 2.0))
 	ATR_MULTIPLIER: float = float(os.getenv("ATR_MULTIPLIER", 2.0))
 
 	# --- Broker ---
@@ -94,6 +98,7 @@ REDIS_CONFIG = {
 	"port": int(os.getenv("REDIS_PORT", 6379)),
 	"db": int(os.getenv("REDIS_DB", 0)),
 }
+
 
 
 

@@ -1,3 +1,4 @@
+# app/main.py
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -30,6 +31,7 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 	except jwt.InvalidTokenError:
 		raise HTTPException(status_code=401, detail="Invalid token")
 
+# --- Lifespan: запуск и остановка приложения ---
 async def lifespan(app: FastAPI):
 	# 🚀 Запуск
 	logger.info("Запуск ARK Bot API...")
@@ -51,6 +53,7 @@ async def lifespan(app: FastAPI):
 	await close_redis()
 	await telegram_service.send_message("ARK Bot остановлен ❌")
 
+# --- FastAPI app ---
 app = FastAPI(
 	title="ARK Trading Bot",
 	description="Автоматизированный торговый бот: спот, фьючерсы, ML, динамическая аллокация",
@@ -58,6 +61,7 @@ app = FastAPI(
 	lifespan=lifespan
 )
 
+# --- Middleware ---
 app.add_middleware(
 	CORSMiddleware,
 	allow_origins=config.settings.ALLOWED_ORIGINS,
@@ -79,6 +83,7 @@ async def log_requests(request: Request, call_next):
 	logger.info(f"Ответ: {response.status_code} за {duration:.4f} сек")
 	return response
 
+# --- SQL логирование ---
 @event.listens_for(engine_mainnet.sync_engine, "before_cursor_execute")
 def before_cursor_execute_mainnet(conn, cursor, statement, parameters, context, executemany):
 	logger.info(f"[MAINNET SQL] {statement} | params: {parameters}")
@@ -87,6 +92,7 @@ def before_cursor_execute_mainnet(conn, cursor, statement, parameters, context, 
 def before_cursor_execute_testnet(conn, cursor, statement, parameters, context, executemany):
 	logger.info(f"[TESTNET SQL] {statement} | params: {parameters}")
 
+# --- Роуты ---
 app.include_router(routes_signals.router, prefix="/api/v1/signals", tags=["Signals"])
 app.include_router(routes_trades.router, prefix="/api/v1/trades", tags=["Trades"])
 app.include_router(routes_users.router, prefix="/api/v1/users", tags=["Users"])
@@ -95,6 +101,7 @@ app.include_router(routes_indicators.router, prefix="/api/v1/indicators", tags=[
 app.include_router(routes_news.router, prefix="/api/v1/news", tags=["News"])
 app.include_router(prometheus.router)
 
+# --- Endpoints ---
 @app.get("/")
 async def root():
 	return {"message": "ARK Bot API is running", "mode": config.settings.TRADING_MODE}

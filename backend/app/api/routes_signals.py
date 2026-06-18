@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
@@ -10,21 +10,19 @@ from app.db import crud
 from app.services.telegram import send_trade_notification
 from app.services.ml import MLService
 from app.services.news_loader import NewsLoader
-from app.broker.rabbitmq import RabbitMQBroker
-from app.cache.redis import RedisCache
 from app.utils.logger import logger
 from app.config import settings
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
+# --- ML Service ---
 ml_service = MLService()
 try:
-	ml_service.load_model("models/sklearn_model.pkl", model_type="sklearn")
+	ml_service.load_model(settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
 except Exception:
 	ml_service.model = None 
 
-rabbitmq = RabbitMQBroker()
-redis_cache = RedisCache()
+# --- News Loader ---
 news_loader = NewsLoader(newsdata_api_key=settings.NEWSDATA_API_KEY)
 
 @router.get("/")
@@ -66,7 +64,10 @@ async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
 	return result
 
 @router.post("/", response_model=Signal)
-async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
+async def create_signal(request: Request, signal: Signal, db: AsyncSession = Depends(get_db)):
+	broker = request.app.state.broker       # ✅ используем broker из app.state
+	redis_client = request.app.state.redis  # ✅ используем redis из app.state
+
 	if signal.direction not in ["buy", "sell"]:
 		raise HTTPException(status_code=400, detail="Direction must be 'buy' or 'sell'")
 
@@ -111,7 +112,7 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 			logger.error(f"❌ Ошибка ML при прогнозе: {e}")
 			raise HTTPException(status_code=500, detail=f"Ошибка ML при прогнозе: {e}")
 
-		if prob < 0.6:
+		if prob < settings.CONFIDENCE_THRESHOLD:  # ✅ используем параметр из settings
 			logger.warning(f"⚠️ Сигнал отфильтрован как слабый (prob={prob:.2f})")
 			raise HTTPException(status_code=400, detail=f"Сигнал отфильтрован как слабый (prob={prob:.2f})")
 	else:
@@ -122,10 +123,10 @@ async def create_signal(signal: Signal, db: AsyncSession = Depends(get_db)):
 		if prob is not None:
 			new_signal.confidence = prob
 
-		await rabbitmq.publish_signal(new_signal.dict())
+		await broker.publish_signal(new_signal.dict())
 		logger.info(f"📤 Сигнал опубликован в RabbitMQ: {new_signal.symbol}")
 
-		await redis_cache.set_json("last_signal", new_signal.dict(), expire=300)
+		await redis_client.set_json("last_signal", new_signal.dict(), expire=300)
 		logger.info(f"💾 Сигнал сохранён в Redis: {new_signal.symbol}")
 
 		msg = f"📈 Новый сигнал: {new_signal.symbol} {new_signal.direction} ({new_signal.indicator})"
