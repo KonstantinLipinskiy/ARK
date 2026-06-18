@@ -3,14 +3,16 @@ import asyncio
 import json
 import time
 from app.services.agents import AgentsService
-from app.services.rabbitmq import RabbitMQBroker
+from app.broker.rabbitmq import RabbitMQBroker
 from app.utils.logger import logger
 from app.utils.metrics import AGENT_REQUESTS, AGENT_ERRORS, AGENT_LATENCY
 
 class AgentsWorker:
-	def __init__(self, llm_provider: str = "openai"):
+	def __init__(self):
+		# RabbitMQ брокер
 		self.broker = RabbitMQBroker()
-		self.agents_service = AgentsService(llm_provider=llm_provider, temperature=0.2, top_p=0.9, max_tokens=512)
+		# AgentsService без лишних параметров — всё читается из config.py
+		self.agents_service = AgentsService()
 		self.queue_name = "queue_agents"
 
 	async def start(self):
@@ -29,36 +31,37 @@ class AgentsWorker:
 			logger.info(f"📥 Получен запрос агента: {query} (user_id={user_id})")
 			AGENT_REQUESTS.inc()
 
+			# Вызов агента — run_agent синхронный, поэтому без await
 			result = self.agents_service.run_agent(query)
 
 			latency = time.time() - start_time
 			AGENT_LATENCY.observe(latency)
 
 			response_payload = {
-					"type": "agent_response",
-					"user_id": user_id,
-					"query": query,
-					"result": result,
-					"latency": latency
+				"type": "agent_response",
+				"user_id": user_id,
+				"query": query,
+				"result": result,
+				"latency": latency
 			}
 			await self.broker.publish("queue_telegram", response_payload)
 			await message.ack()
-			logger.info(f"📤 Ответ агента отправлен: {result[:100]}...")
+			logger.info(f"📤 Ответ агента отправлен: {str(result)[:100]}...")
 
 		except Exception as e:
 			AGENT_ERRORS.inc()
 			logger.error(f"❌ Ошибка обработки агента: {e}")
 			error_payload = {
-					"type": "agent_error",
-					"error": str(e),
-					"query": body.get("query", "-"),
-					"user_id": body.get("user_id", None)
+				"type": "agent_error",
+				"error": str(e),
+				"query": body.get("query", "-"),
+				"user_id": body.get("user_id", None)
 			}
 			await self.broker.publish("queue_telegram", error_payload)
 			await message.ack()
 
 async def main():
-	worker = AgentsWorker(llm_provider="openai")
+	worker = AgentsWorker()
 	await worker.start()
 
 if __name__ == "__main__":
