@@ -140,8 +140,18 @@ class AgentsService:
 		logger.info(f"Сигнал принят: {signal}")
 		return f"✅ Ключевой сигнал принят: {signal}"
 
-	def generate_report(self, trades: list[dict]) -> str:
-		return self.reports.generate_rag_report(trades)
+	def generate_report(self, trades: list[dict], output_format: str = "text") -> str:
+		"""
+		Генерация RAG-отчёта по сделкам с поддержкой разных форматов.
+		Форматы: text | json | markdown | html
+		"""
+		try:
+			report = self.reports.generate_rag_report(trades, output_format=output_format)
+			logger.info(f"RAG отчёт успешно сформирован агентом, формат={output_format}")
+			return report
+		except Exception as e:
+			logger.error(f"Ошибка генерации отчёта агентом: {e}")
+			return f"❌ Ошибка генерации отчёта: {e}"
 
 	def check_risk(self, trade: dict) -> str:
 		max_loss = settings.MAX_LOSS_PER_TRADE

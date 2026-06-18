@@ -33,45 +33,65 @@ class ReportsService:
 	def use_collection(self, name: str):
 		self.vector_db.use_collection(name)
 
-	def generate_report(self, query: str) -> str:
-		self.requests_count += 1
-		REPORT_REQUESTS_TOTAL.inc()
-		start = time.time()
-		result = self.qa_chain.run(query)
-		duration = time.time() - start
-		self.total_time += duration
-		REPORT_AVG_RESPONSE_TIME.set(self.total_time / self.requests_count)
-		return result
+	def generate_report(self, trades: list[dict], output_format: str = "text") -> str:
+		"""
+		Генерация RAG-отчёта по сделкам с поддержкой разных форматов.
+		Форматы: text | json | markdown | html
+		"""
+		try:
+			report = self.reports.generate_rag_report(trades, output_format=output_format)
+			logger.info(f"RAG отчёт успешно сформирован агентом, формат={output_format}")
+			return report
+		except Exception as e:
+			logger.error(f"Ошибка генерации отчёта агентом: {e}")
+			return f"❌ Ошибка генерации отчёта: {e}"
 
 	def generate_rag_report(
 		self,
 		trades: List[Dict],
 		filters: Optional[Dict] = None,
 		limit: int = 100,
-		output_format: str = "text"  # text | json | markdown
+		output_format: str = "text"  # text | json | markdown | html
 	) -> str:
 		"""Комплексный RAG-отчёт с метриками, ML прогнозами и сравнением стратегий/пользователей.
 		🔹 Добавлена фильтрация: исключаем тестовые трейды и нерелевантные документы.
-		🔹 Поддержка форматов: text, json, markdown.
+		🔹 Поддержка форматов: text, json, markdown, html.
 		"""
 		self.requests_count += 1
 		REPORT_REQUESTS_TOTAL.inc()
 		start = time.time()
 
-		# 🔹 Фильтрация трейдов: исключаем тестовые и пустые
 		trades = [t for t in trades if not t.get("test", False) and t.get("action") in ["buy", "sell"]]
-
 		metrics = calculate_metrics(trades)
 
 		ml_summary = ""
 		try:
 			if trades:
+				last = trades[-1]
 				features = {
-					"ema": trades[-1].get("ema", 0.0),
-					"rsi": trades[-1].get("rsi", 0.0),
-					"macd": trades[-1].get("macd", 0.0),
-					"hour": trades[-1].get("hour", 0),
-					"atr": trades[-1].get("atr", 0.0)
+					"ema": last.get("ema", 0.0),
+					"rsi": last.get("rsi", 0.0),
+					"macd": last.get("macd", 0.0),
+					"hour": last.get("hour", 0),
+					"atr": last.get("atr", 0.0),
+					"bollinger_upper": last.get("bollinger_upper", 0.0),
+					"bollinger_lower": last.get("bollinger_lower", 0.0),
+					"bollinger": last.get("bollinger", 0.0),
+					"obv": last.get("obv", 0.0),
+					"stochastic": last.get("stochastic", 0.0),
+					"vwap": last.get("vwap", 0.0),
+					"ichimoku": last.get("ichimoku", 0.0),
+					"volume": last.get("volume", 0.0),
+					"volume_ma": last.get("volume_ma", 0.0),
+					"news_sentiment": last.get("news_sentiment", 0.0),
+					"last_price": last.get("last_price", 0.0),
+					"spread": last.get("spread", 0.0),
+					"liquidity_imbalance": last.get("liquidity_imbalance", 0.0),
+					"mark_price": last.get("mark_price", 0.0),
+					"volatility": last.get("volatility", 0.0),
+					"momentum": last.get("momentum", 0.0),
+					"sentiment_ma": last.get("sentiment_ma", 0.0),
+					"bid_ask_ratio": last.get("bid_ask_ratio", 0.0)
 				}
 				prob = self.ml.predict_signal(features)
 				ml_summary = f"ML прогноз по последнему сигналу: {prob:.2f}"
@@ -85,12 +105,7 @@ class ReportsService:
 				search_results = self.vector_db.search_with_filter(query_vector, filters, limit)
 			else:
 				search_results = self.vector_db.search(query_vector, limit)
-
-			# 🔹 Фильтрация документов: исключаем нерелевантные
-			search_results = [
-				doc for doc in search_results
-				if not doc.get("payload", {}).get("irrelevant", False)
-			]
+			search_results = [doc for doc in search_results if not doc.get("payload", {}).get("irrelevant", False)]
 		except Exception as e:
 			logger.error(f"Ошибка поиска документов для отчёта: {e}")
 
@@ -109,7 +124,6 @@ class ReportsService:
 		except Exception as e:
 			logger.error(f"Ошибка сравнения стратегий/пользователей: {e}")
 
-		# --- Форматирование ---
 		if output_format == "json":
 			report = json.dumps({
 				"metrics": metrics,
@@ -139,8 +153,36 @@ class ReportsService:
 				f"- 👤 User {c['user_id']}, Strategy {c['strategy']}: Winrate={c['winrate']:.2%}, Profit={c['profit']:.2f}"
 				for c in comparison_summary
 			])
+		elif output_format == "html":
+			template = Template("""
+			<html>
+			<head><title>RAG Report</title></head>
+			<body>
+			<h1>📊 RAG Отчёт</h1>
+			<p>Всего сделок: {{ metrics.trades_count }}</p>
+			<p>Winrate: {{ metrics.winrate|round(4) }}</p>
+			<p>Profit: {{ metrics.total_profit }}</p>
+			<p>Drawdown: {{ metrics.max_drawdown }}</p>
+			<p>Sharpe: {{ metrics.sharpe_ratio }}</p>
+			<p>Sortino: {{ metrics.sortino_ratio }}</p>
+			<p>Profit Factor: {{ metrics.profit_factor }}</p>
+			<p>Макс. серия побед: {{ metrics.max_consecutive_wins }}</p>
+			<p>Макс. серия поражений: {{ metrics.max_consecutive_losses }}</p>
+			<p>{{ ml_summary }}</p>
+			<p>🔎 Найдено документов: {{ documents_found }}</p>
+			<h2>Сравнение стратегий и пользователей</h2>
+			<ul>
+			{% for c in comparison %}
+				<li>👤 User {{ c.user_id }}, Strategy {{ c.strategy }}: Winrate={{ c.winrate|round(4) }}, Profit={{ c.profit }}</li>
+			{% endfor %}
+			</ul>
+			</body>
+			</html>
+			""")
+			report = template.render(metrics=metrics, ml_summary=ml_summary,
+										documents_found=len(search_results),
+										comparison=comparison_summary)
 		else:
-			# текстовый отчёт
 			report = (
 				f"📊 RAG Отчёт\n"
 				f"Всего сделок: {metrics['trades_count']}\n"
@@ -164,6 +206,7 @@ class ReportsService:
 		duration = time.time() - start
 		self.total_time += duration
 		REPORT_AVG_RESPONSE_TIME.set(self.total_time / self.requests_count)
+		logger.info(f"RAG отчёт успешно сформирован, формат={output_format}")
 		return report
 
 	def export_report_pdf(self, report_text: str, filename: str = "report.pdf"):

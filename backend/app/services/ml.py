@@ -161,9 +161,7 @@ class MLService:
 
 		return df
 
-
 	# --- ОБУЧЕНИЕ ---
-
 	def train(self, 
 				df: pd.DataFrame, 
 				model_type: str = "sklearn", 
@@ -560,7 +558,6 @@ class MLService:
 		else:
 			raise ValueError("Неизвестный тип модели")
 
-
 	# --- ПРЕДСКАЗАНИЯ ---
 	def predict_signal(self, features: dict) -> float:
 		if not self.model:
@@ -723,9 +720,6 @@ class MLService:
 			log_model_load(model_type, path, params)
 
 			return ml_model
-
-
-
 
 
 	# --- СОХРАНЕНИЕ ЭМБЕДДИНГА СИГНАЛА ---

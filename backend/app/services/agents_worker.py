@@ -16,23 +16,31 @@ class AgentsWorker:
 		self.queue_name = "queue_agents"
 
 	async def start(self):
+		"""Запуск воркера: подключение к RabbitMQ и прослушивание очереди."""
 		await self.broker.connect()
 		await self.broker.channel.queue_declare(queue=self.queue_name, durable=True)
 		await self.broker.channel.basic_consume(self.queue_name, self.handle_message, auto_ack=False)
 		logger.info("🚀 AgentsWorker запущен и слушает очередь queue_agents")
 
 	async def handle_message(self, message):
+		"""Обработка входящего запроса агента."""
 		start_time = time.time()
 		try:
 			body = json.loads(message.body.decode())
 			query = body.get("query")
 			user_id = body.get("user_id")
+			output_format = body.get("output_format", "text")  # text | json | markdown | html
 
-			logger.info(f"📥 Получен запрос агента: {query} (user_id={user_id})")
+			logger.info(f"📥 Получен запрос агента: {query} (user_id={user_id}, format={output_format})")
 			AGENT_REQUESTS.inc()
 
 			# Вызов агента — run_agent синхронный, поэтому без await
-			result = self.agents_service.run_agent(query)
+			# Если запрос — это генерация отчёта, пробрасываем формат
+			if isinstance(query, dict) and query.get("type") == "report":
+				trades = query.get("trades", [])
+				result = self.agents_service.generate_report(trades, output_format=output_format)
+			else:
+				result = self.agents_service.run_agent(query)
 
 			latency = time.time() - start_time
 			AGENT_LATENCY.observe(latency)
@@ -46,7 +54,7 @@ class AgentsWorker:
 			}
 			await self.broker.publish("queue_telegram", response_payload)
 			await message.ack()
-			logger.info(f"📤 Ответ агента отправлен: {str(result)[:100]}...")
+			logger.info(f"📤 Ответ агента отправлен пользователю {user_id}, формат={output_format}, результат={str(result)[:100]}...")
 
 		except Exception as e:
 			AGENT_ERRORS.inc()
