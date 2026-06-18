@@ -5,6 +5,8 @@ import asyncio
 from datetime import datetime
 from numba import njit
 from sqlalchemy.ext.asyncio import AsyncSession
+import os
+import pandas as pd
 
 from app.services import indicators, risk
 from app.services.ml import MLService
@@ -15,6 +17,9 @@ from app.services.exchange import load_strategies
 from app.broker.rabbitmq import RabbitMQBroker
 from app.db import crud
 from app.models.trade import Trade
+from scripts.fetch_data import update_csv, PAIRS
+
+
 
 # --- ML Service ---
 ml_service = MLService()
@@ -404,6 +409,11 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: st
 
 # --- Пример запуска ---
 if __name__ == "__main__":
+	# 🔹 Обновляем данные для всех пар перед бэктестом
+	os.makedirs("data", exist_ok=True)
+	for pair in PAIRS:
+		update_csv(symbol=pair, timeframe="1h", days=60, out_dir="data")
+
 	loop = asyncio.get_event_loop()
 	all_metrics = {}
 	all_results = {}
@@ -432,26 +442,9 @@ if __name__ == "__main__":
 							await save_trades_to_db(results, pair, strategy_name=strategy_name)
 							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name)
 
-							try:
-								df_trades = pd.DataFrame(results)
-								if not df_trades.empty:
-									df_trades["result"] = (df_trades["exit"] - df_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
-									train_metrics = ml_service.train(df_trades, model_type=settings.MODEL_TYPE)
-									ml_service.save_model(settings.MODEL_PATH)
-									logger.info(f"ML обучение завершено для {pair} ({strategy_name}): {train_metrics}")
-							except Exception as e:
-								logger.error(f"❌ Ошибка обучения ML на истории {pair} ({strategy_name}): {e}")
-								await crud.create_risk_log(session, {
-									"reason": f"ML training failed: {e}",
-									"symbol": pair,
-									"position_size": None,
-									"deposit": settings.DEFAULT_DEPOSIT,
-									"sentiment": None,
-									"profit_loss": None,
-									"expected_pnl": None
-								})
-
-							plot_backtest(df, results, pair, strategy_name)
+							# 🔹 Визуализация только в dev-режиме
+							if getattr(settings, "ENV", "dev") == "dev":
+								plot_backtest(df, results, pair, strategy_name)
 
 						except Exception as e:
 							logger.error(f"❌ Ошибка бэктеста для {pair} ({strategy_name}): {e}")
@@ -471,6 +464,18 @@ if __name__ == "__main__":
 
 	loop.run_until_complete(run_backtests())
 
+	# 🔹 Батч-обучение ML на всех сделках
+	all_trades = []
+	for results in all_results.values():
+		all_trades.extend(results)
+
+	df_all_trades = pd.DataFrame(all_trades)
+	if not df_all_trades.empty:
+		df_all_trades["result"] = (df_all_trades["exit"] - df_all_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
+		train_metrics = ml_service.train(df_all_trades, model_type=settings.MODEL_TYPE)
+		ml_service.save_model(settings.MODEL_PATH)
+		logger.info(f"ML обучение завершено на общем датасете: {train_metrics}")
+
 	df_report = pd.DataFrame.from_dict(all_metrics, orient="index")
 	print("\n=== Сводный отчёт по всем парам и стратегиям ===")
 	print(df_report)
@@ -480,4 +485,6 @@ if __name__ == "__main__":
 		from app.utils.export import export_to_excel
 		export_to_excel(all_metrics, all_results)
 		print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
+
+
 
