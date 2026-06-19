@@ -61,8 +61,9 @@ signals_sell_total = Gauge("signals_sell_total", "Total number of SELL signals")
 # 🔹 Метрики Prometheus (RabbitMQ)
 rabbitmq_messages_published = Gauge("rabbitmq_messages_published_total", "Total messages published to RabbitMQ")
 rabbitmq_messages_consumed = Gauge("rabbitmq_messages_consumed_total", "Total messages consumed from RabbitMQ")
-rabbitmq_errors_total = Gauge("rabbitmq_errors_total", "Total RabbitMQ errors")
-rabbitmq_processing_time = Histogram("rabbitmq_processing_time_seconds", "Message processing time in RabbitMQ")
+rabbitmq_errors_total = Gauge("rabbitmq_errors_total", "Total RabbitMQ errors (current value from broker)")
+rabbitmq_processing_time_avg = Histogram("rabbitmq_processing_time_avg_seconds", "Average message processing time in RabbitMQ")
+rabbitmq_processing_time_max = Histogram("rabbitmq_processing_time_max_seconds", "Maximum message processing time in RabbitMQ")
 
 # 🔹 Метрики Prometheus (Redis)
 redis_keys_total = Gauge("redis_keys_total", "Total number of keys in Redis")
@@ -141,9 +142,10 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		rabbitmq_messages_published.set(metrics["messages_published"])
 		rabbitmq_messages_consumed.set(metrics["messages_consumed"])
 		rabbitmq_errors_total.set(metrics["errors_total"])
-		rabbitmq_processing_time.observe(metrics["avg_processing_time"])
+		rabbitmq_processing_time_avg.observe(metrics["avg_processing_time"])
+		rabbitmq_processing_time_max.observe(metrics["max_processing_time"])
 	except Exception:
-		rabbitmq_errors_total.set(1)
+		rabbitmq_errors_total.set(0)
 
 	# --- Метрики Redis ---
 	redis = RedisCache()
@@ -186,6 +188,6 @@ def log_error():
 	увеличивает счётчики ошибок для торговли, RabbitMQ, индикаторов и Qdrant.
 	"""
 	errors_counter.inc()
-	rabbitmq_errors_total.set(1)
+	rabbitmq_errors_total.set(rabbitmq_errors_total._value.get() + 1)
 	indicators_tasks_errors.inc()
 	VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="general").inc()

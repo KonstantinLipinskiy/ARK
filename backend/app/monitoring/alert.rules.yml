@@ -57,6 +57,15 @@ groups:
           summary: "Медленная обработка сообщений"
           description: "Среднее время обработки сообщений RabbitMQ превысило 2 секунды."
 
+      - alert: RabbitMQMaxProcessingTime
+        expr: rabbitmq_processing_time_seconds > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RabbitMQ обработка слишком долгая"
+          description: "Максимальное время обработки сообщений превысило 5 секунд."
+
       # --- Метрики Redis ---
       - alert: RedisHighLatency
         expr: redis_latency_seconds > 0.5
@@ -66,6 +75,15 @@ groups:
         annotations:
           summary: "Высокая задержка Redis"
           description: "Задержка Redis превысила 0.5 секунд."
+
+      - alert: RedisPingLatency
+        expr: redis_latency_summary_seconds > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis ping latency высокая"
+          description: "Время ответа Redis превысило 0.5 секунд."
 
       - alert: RedisNoKeys
         expr: redis_keys_total == 0
@@ -149,3 +167,22 @@ groups:
         annotations:
           summary: "Learning Rate вне диапазона"
           description: "LR слишком маленький или слишком большой."
+
+      # --- Метрики Qdrant ---
+      - alert: QdrantHighLatency
+        expr: vector_search_latency_seconds{collection="arkbot_vectors"} > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокая задержка поиска Qdrant"
+          description: "Latency поиска в Qdrant превысила 1 секунду."
+
+      - alert: QdrantErrors
+        expr: vector_errors_total{collection="arkbot_vectors"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ошибки Qdrant"
+          description: "Обнаружены ошибки операций Qdrant."

@@ -177,8 +177,13 @@
       },
       {
         "type": "graph",
-        "title": "RabbitMQ Processing Time",
-        "targets": [{ "expr": "rabbitmq_processing_time_seconds" }]
+        "title": "RabbitMQ Processing Time (Avg)",
+        "targets": [{ "expr": "rabbitmq_processing_time_avg_seconds" }]
+      },
+      {
+        "type": "graph",
+        "title": "RabbitMQ Processing Time (Max)",
+        "targets": [{ "expr": "rabbitmq_processing_time_max_seconds" }]
       },
       {
         "type": "graph",
@@ -189,11 +194,6 @@
         "type": "graph",
         "title": "Redis Latency",
         "targets": [{ "expr": "redis_latency_seconds" }]
-      },
-      {
-        "type": "graph",
-        "title": "Redis Errors",
-        "targets": [{ "expr": "redis_errors_total" }]
       },
       {
         "type": "graph",
@@ -219,6 +219,16 @@
         "type": "graph",
         "title": "Bot Errors",
         "targets": [{ "expr": "bot_errors_total" }]
+      },
+      {
+        "type": "graph",
+        "title": "Qdrant Search Latency",
+        "targets": [{ "expr": "vector_search_latency_seconds{collection=\"arkbot_vectors\"}" }]
+      },
+      {
+        "type": "graph",
+        "title": "Qdrant Errors",
+        "targets": [{ "expr": "vector_errors_total{collection=\"arkbot_vectors\"}" }]
       }
     ],
     "templating": {

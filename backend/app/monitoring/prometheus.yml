@@ -5,6 +5,11 @@ global:
 rule_files:
   - "alert.rules.yml"
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   # Метрики самого Prometheus
   - job_name: "prometheus"
@@ -25,7 +30,7 @@ scrape_configs:
           project: "ark_bot"
           service: "api"
 
-  # Метрики Redis
+  # Метрики Redis (через redis_exporter)
   - job_name: "redis"
     static_configs:
       - targets: ["redis:6379"]
@@ -34,7 +39,7 @@ scrape_configs:
           project: "ark_bot"
           service: "redis"
 
-  # Метрики RabbitMQ (если включен prometheus-плагин)
+  # Метрики RabbitMQ (через prometheus-плагин)
   - job_name: "rabbitmq"
     static_configs:
       - targets: ["rabbitmq:15692"]
@@ -51,3 +56,13 @@ scrape_configs:
           env: "prod"
           project: "ark_bot"
           service: "postgres"
+
+  # Метрики Qdrant (HTTP API)
+  - job_name: "qdrant"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["qdrant:6333"]
+        labels:
+          env: "prod"
+          project: "ark_bot"
+          service: "qdrant"
