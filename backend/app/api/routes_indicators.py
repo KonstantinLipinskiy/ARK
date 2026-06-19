@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+# app/api/routes_indicators.py
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
@@ -7,6 +8,7 @@ from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
 from app.services.indicator_factory import IndicatorFactory
 from app.utils.logger import logger
+from app.utils.security import get_current_user
 from app.monitoring.prometheus import (
 	indicators_tasks_total,
 	indicators_tasks_errors,
@@ -24,7 +26,10 @@ class IndicatorTask(BaseModel):
 	kwargs: dict
 
 @router.post("/calculate")
-async def calculate_indicator(task: IndicatorTask, request: Request):
+async def calculate_indicator(
+	task: IndicatorTask,
+	current_user: dict = Depends(get_current_user)
+):
 	"""
 	Кладёт задачу расчёта индикатора в очередь RabbitMQ и пишет статус в Redis.
 	"""
@@ -40,7 +45,7 @@ async def calculate_indicator(task: IndicatorTask, request: Request):
 			"pair": task.pair,
 			"indicator": task.indicator,
 			"kwargs": task.kwargs,
-			"user_id": getattr(request.state, "user_id", None)
+			"user_id": current_user["user_id"]
 		}
 
 		start_time = time.time()

@@ -1,3 +1,4 @@
+# app/api/routes_news.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
@@ -7,6 +8,7 @@ from datetime import datetime
 from app.models.news import NewsCreate, NewsRead
 from app.db.session import get_db
 from app.db import crud
+from app.utils.security import get_current_user   # ✅ централизованная авторизация
 
 router = APIRouter(prefix="/news", tags=["news"])
 
@@ -18,7 +20,8 @@ async def get_news(
 	source: Optional[str] = Query(None),
 	date_from: Optional[datetime] = Query(None),
 	date_to: Optional[datetime] = Query(None),
-	db: AsyncSession = Depends(get_db)
+	db: AsyncSession = Depends(get_db),
+	current_user: dict = Depends(get_current_user)   # ✅ авторизация
 ):
 	try:
 		result = await crud.get_news(
@@ -31,7 +34,11 @@ async def get_news(
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @router.post("/", response_model=NewsRead)
-async def create_news(news: NewsCreate, db: AsyncSession = Depends(get_db)):
+async def create_news(
+	news: NewsCreate,
+	db: AsyncSession = Depends(get_db),
+	current_user: dict = Depends(get_current_user)   # ✅ авторизация
+):
 	try:
 		new_news = await crud.create_news(db, **news.dict())
 		return new_news
@@ -39,13 +46,21 @@ async def create_news(news: NewsCreate, db: AsyncSession = Depends(get_db)):
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @router.delete("/{news_id}")
-async def delete_news(news_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_news(
+	news_id: int,
+	db: AsyncSession = Depends(get_db),
+	current_user: dict = Depends(get_current_user)   # ✅ авторизация
+):
 	deleted = await crud.delete_news(db, news_id)
 	if not deleted:
 		raise HTTPException(status_code=404, detail="News not found")
 	return {"detail": "News deleted"}
 
 @router.delete("/old")
-async def delete_old_news(days: int = 30, db: AsyncSession = Depends(get_db)):
+async def delete_old_news(
+	days: int = 30,
+	db: AsyncSession = Depends(get_db),
+	current_user: dict = Depends(get_current_user)   # ✅ авторизация
+):
 	count = await crud.delete_old_news(db, days)
 	return {"detail": f"{count} old news deleted"}

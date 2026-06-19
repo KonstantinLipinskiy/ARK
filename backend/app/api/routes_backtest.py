@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.db.session import get_session
 from app.db import crud
+from app.utils.security import get_current_user   # ✅ добавили централизованную авторизацию
 
 router = APIRouter(prefix="/api", tags=["Backtest"])
 
@@ -18,7 +19,8 @@ async def get_backtest_reports(
 	user_id: Optional[int] = None,
 	date_from: Optional[str] = None,
 	date_to: Optional[str] = None,
-	db: AsyncSession = Depends(get_session)
+	db: AsyncSession = Depends(get_session),
+	current_user: dict = Depends(get_current_user)   # ✅ централизованная авторизация
 ):
 	return await crud.get_backtest_reports_paginated(
 		db=db,
@@ -40,7 +42,8 @@ async def get_trades(
 	status: Optional[str] = None,
 	date_from: Optional[str] = None,
 	date_to: Optional[str] = None,
-	db: AsyncSession = Depends(get_session)
+	db: AsyncSession = Depends(get_session),
+	current_user: dict = Depends(get_current_user)   # ✅ централизованная авторизация
 ):
 	return await crud.get_trades(
 		db=db,
@@ -64,7 +67,8 @@ async def get_risk_logs(
 	sentiment: Optional[float] = None,
 	profit_loss_min: Optional[float] = None,
 	profit_loss_max: Optional[float] = None,
-	db: AsyncSession = Depends(get_session)
+	db: AsyncSession = Depends(get_session),
+	current_user: dict = Depends(get_current_user)   # ✅ централизованная авторизация
 ):
 	return await crud.get_risk_logs(
 		db=db,

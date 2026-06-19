@@ -1,3 +1,4 @@
+#app/api/routes_users.py
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,8 +9,7 @@ from app.models.user import UserOut, UserCreate, User
 from app.db.schemas import UserORM
 from app.db.session import get_db
 from app.services.telegram import telegram_service
-from app.utils.auth import get_current_user
-from app.utils.security import hash_password
+from app.utils.security import hash_password, get_current_user
 from app.utils.logger import logger
 
 router = APIRouter(prefix="/users", tags=["users"])

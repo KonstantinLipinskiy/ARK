@@ -9,7 +9,7 @@ from app.db.schemas import UserORM, TradeORM, SignalORM, StrategyORM
 from app.services.exchange import load_strategies   # ✅ централизованный источник
 from app.services.strategy_service import add_strategy, update_strategy, delete_strategy, toggle_strategy
 from app.services.risk_service import load_risk_settings, update_risk_settings
-from app.utils.auth import get_current_admin
+from app.utils.security import get_current_admin
 from app.utils.logger import logger
 from app.utils.metrics import calculate_metrics
 from app.services.telegram import telegram_service

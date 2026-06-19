@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+# app/api/routes_signals.py
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,6 +13,7 @@ from app.services.ml import MLService
 from app.services.news_loader import NewsLoader
 from app.utils.logger import logger
 from app.config import settings
+from app.utils.security import get_current_user   # ✅ добавили импорт
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -64,9 +66,13 @@ async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
 	return result
 
 @router.post("/", response_model=Signal)
-async def create_signal(request: Request, signal: Signal, db: AsyncSession = Depends(get_db)):
-	broker = request.app.state.broker       # ✅ используем broker из app.state
-	redis_client = request.app.state.redis  # ✅ используем redis из app.state
+async def create_signal(
+	signal: Signal,
+	db: AsyncSession = Depends(get_db),
+	current_user: dict = Depends(get_current_user)   # ✅ централизованная авторизация
+):
+	broker = db.bind.app.state.broker       # ⚠️ broker лучше хранить в app.state
+	redis_client = db.bind.app.state.redis  # ⚠️ redis лучше хранить в app.state
 
 	if signal.direction not in ["buy", "sell"]:
 		raise HTTPException(status_code=400, detail="Direction must be 'buy' or 'sell'")
@@ -89,7 +95,8 @@ async def create_signal(request: Request, signal: Signal, db: AsyncSession = Dep
 		"last_price": getattr(signal, "last_price", 0.0),
 		"spread": getattr(signal, "spread", 0.0),
 		"liquidity_imbalance": getattr(signal, "liquidity_imbalance", 0.0),
-		"mark_price": getattr(signal, "mark_price", 0.0)
+		"mark_price": getattr(signal, "mark_price", 0.0),
+		"user_id": current_user["user_id"]   # ✅ теперь user_id берём из авторизации
 	}
 
 	# 🔹 Подтягиваем свежие новости и считаем sentiment
@@ -112,7 +119,7 @@ async def create_signal(request: Request, signal: Signal, db: AsyncSession = Dep
 			logger.error(f"❌ Ошибка ML при прогнозе: {e}")
 			raise HTTPException(status_code=500, detail=f"Ошибка ML при прогнозе: {e}")
 
-		if prob < settings.CONFIDENCE_THRESHOLD:  # ✅ используем параметр из settings
+		if prob < settings.CONFIDENCE_THRESHOLD:
 			logger.warning(f"⚠️ Сигнал отфильтрован как слабый (prob={prob:.2f})")
 			raise HTTPException(status_code=400, detail=f"Сигнал отфильтрован как слабый (prob={prob:.2f})")
 	else:
@@ -139,6 +146,7 @@ async def create_signal(request: Request, signal: Signal, db: AsyncSession = Dep
 	except SQLAlchemyError as e:
 		logger.error(f"❌ Ошибка БД при создании сигнала: {e}")
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
 
 @router.put("/{signal_id}", response_model=Signal)
 async def update_signal(signal_id: int, updated: Signal, db: AsyncSession = Depends(get_db)):

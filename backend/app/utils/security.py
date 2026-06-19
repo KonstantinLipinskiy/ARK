@@ -1,8 +1,11 @@
+# app/utils/security.py
 import hashlib
 import os
 import jwt
 from datetime import datetime, timedelta
+from fastapi import Request, HTTPException
 from app.config import settings
+from app.utils.logger import logger
 
 # 🔹 Хэширование пароля с солью
 def hash_password(password: str) -> tuple[str, str]:
@@ -65,3 +68,39 @@ def decode_jwt_token(token: str) -> dict | None:
 		return None
 	except jwt.InvalidTokenError:
 		return None
+
+# 🔹 Получение текущего пользователя из request.state
+async def get_current_user(request: Request) -> dict:
+	"""
+	Вспомогательная функция для использования в эндпоинтах через Depends(get_current_user).
+	Читает user_id и role из request.state.
+	Выбрасывает HTTPException(401), если данные отсутствуют.
+	"""
+	user_id = getattr(request.state, "user_id", None)
+	role = getattr(request.state, "role", None)
+
+	if not user_id or not role:
+		logger.warning("❌ Unauthorized access attempt (no user_id/role)")
+		raise HTTPException(status_code=401, detail="Unauthorized")
+
+	return {"user_id": user_id, "role": role}
+
+# 🔹 Получение текущего администратора
+async def get_current_admin(request: Request) -> dict:
+	"""
+	Вспомогательная функция для использования в эндпоинтах через Depends(get_current_admin).
+	Проверяет, что роль пользователя — admin.
+	Выбрасывает HTTPException(403), если роль не admin.
+	"""
+	user_id = getattr(request.state, "user_id", None)
+	role = getattr(request.state, "role", None)
+
+	if not user_id or not role:
+		logger.warning("❌ Unauthorized admin access attempt (no user_id/role)")
+		raise HTTPException(status_code=401, detail="Unauthorized")
+
+	if role != "admin":
+		logger.error(f"🚫 User {user_id} with role '{role}' tried to access admin endpoint")
+		raise HTTPException(status_code=403, detail="Admin privileges required")
+
+	return {"user_id": user_id, "role": role}

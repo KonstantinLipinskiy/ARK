@@ -1,3 +1,4 @@
+# app/api/routes_trades.py
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,7 @@ from app.services.telegram import send_trade_notification
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
 from app.utils.logger import logger
+from app.utils.security import get_current_user   # ✅ добавили импорт
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 
@@ -26,7 +28,8 @@ async def get_trades(
 	signal_id: Optional[int] = Query(None),
 	date_from: Optional[datetime] = Query(None),
 	date_to: Optional[datetime] = Query(None),
-	db: AsyncSession = Depends(get_db)
+	db: AsyncSession = Depends(get_db),
+	current_user: dict = Depends(get_current_user)   # ✅ централизованная авторизация
 ):
 	try:
 		result = await crud.get_trades(
@@ -57,7 +60,7 @@ async def get_trades(
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @router.get("/{trade_id}", response_model=Trade)
-async def get_trade(trade_id: int, db: AsyncSession = Depends(get_db)):
+async def get_trade(trade_id: int, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
 	trade = await crud.update_trade(db, trade_id, {})
 	if not trade:
 		raise HTTPException(status_code=404, detail="Trade not found")
@@ -65,7 +68,7 @@ async def get_trade(trade_id: int, db: AsyncSession = Depends(get_db)):
 	return trade
 
 @router.post("/", response_model=Trade)
-async def create_trade(trade: Trade, db: AsyncSession = Depends(get_db)):
+async def create_trade(trade: Trade, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
 	try:
 		new_trade = await crud.create_trade(db, trade)
 
@@ -88,7 +91,7 @@ async def create_trade(trade: Trade, db: AsyncSession = Depends(get_db)):
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @router.put("/{trade_id}", response_model=Trade)
-async def update_trade(trade_id: int, updated: Trade, db: AsyncSession = Depends(get_db)):
+async def update_trade(trade_id: int, updated: Trade, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
 	trade = await crud.update_trade(db, trade_id, updated.dict())
 	if not trade:
 		raise HTTPException(status_code=404, detail="Trade not found")
@@ -96,16 +99,15 @@ async def update_trade(trade_id: int, updated: Trade, db: AsyncSession = Depends
 	return trade
 
 @router.patch("/{trade_id}", response_model=Trade)
-async def patch_trade(trade_id: int, updates: dict, db: AsyncSession = Depends(get_db)):
+async def patch_trade(trade_id: int, updates: dict, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
 	trade = await crud.patch_trade(db, trade_id, updates)
 	if not trade:
 		raise HTTPException(status_code=404, detail="Trade not found")
 	logger.info(f"✏️ Сделка частично обновлена ID={trade_id}")
 	return trade
 
-
 @router.delete("/{trade_id}")
-async def delete_trade(trade_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_trade(trade_id: int, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
 	deleted = await crud.delete_trade(db, trade_id)
 	if not deleted:
 		raise HTTPException(status_code=404, detail="Trade not found")
