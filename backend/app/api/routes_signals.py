@@ -11,9 +11,13 @@ from app.db import crud
 from app.services.telegram import send_trade_notification
 from app.services.ml import MLService
 from app.services.news_loader import NewsLoader
-from app.utils.logger import logger
+from app.utils.logger import (
+	logger,
+	log_order_error,
+	log_signal_rejected,
+)  # ✅ используем централизованные функции
 from app.config import settings
-from app.utils.security import get_current_user   # ✅ добавили импорт
+from app.utils.security import get_current_user   # ✅ централизованная авторизация
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -54,7 +58,7 @@ async def get_signals(
 		logger.info(f"📊 Получены сигналы: {len(result['items'])} шт. (total={result['total_count']})")
 		return result
 	except SQLAlchemyError as e:
-		logger.error(f"❌ Ошибка БД при получении сигналов: {e}")
+		log_order_error("get_signals", e)
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @router.get("/{signal_id}", response_model=Signal)
@@ -69,10 +73,10 @@ async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
 async def create_signal(
 	signal: Signal,
 	db: AsyncSession = Depends(get_db),
-	current_user: dict = Depends(get_current_user)   # ✅ централизованная авторизация
+	current_user: dict = Depends(get_current_user)
 ):
-	broker = db.bind.app.state.broker       # ⚠️ broker лучше хранить в app.state
-	redis_client = db.bind.app.state.redis  # ⚠️ redis лучше хранить в app.state
+	broker = db.bind.app.state.broker
+	redis_client = db.bind.app.state.redis
 
 	if signal.direction not in ["buy", "sell"]:
 		raise HTTPException(status_code=400, detail="Direction must be 'buy' or 'sell'")
@@ -96,7 +100,7 @@ async def create_signal(
 		"spread": getattr(signal, "spread", 0.0),
 		"liquidity_imbalance": getattr(signal, "liquidity_imbalance", 0.0),
 		"mark_price": getattr(signal, "mark_price", 0.0),
-		"user_id": current_user["user_id"]   # ✅ теперь user_id берём из авторизации
+		"user_id": current_user["user_id"]
 	}
 
 	# 🔹 Подтягиваем свежие новости и считаем sentiment
@@ -108,7 +112,7 @@ async def create_signal(
 		else:
 			features["news_sentiment"] = 0.0
 	except Exception as e:
-		logger.error(f"❌ Ошибка загрузки новостей: {e}")
+		log_order_error("news_loader", e)
 		features["news_sentiment"] = 0.0
 
 	# ML фильтрация
@@ -116,11 +120,11 @@ async def create_signal(
 		try:
 			prob = ml_service.predict_signal(features)
 		except Exception as e:
-			logger.error(f"❌ Ошибка ML при прогнозе: {e}")
+			log_order_error("ml_predict", e)
 			raise HTTPException(status_code=500, detail=f"Ошибка ML при прогнозе: {e}")
 
 		if prob < settings.CONFIDENCE_THRESHOLD:
-			logger.warning(f"⚠️ Сигнал отфильтрован как слабый (prob={prob:.2f})")
+			log_signal_rejected(signal.symbol, prob)
 			raise HTTPException(status_code=400, detail=f"Сигнал отфильтрован как слабый (prob={prob:.2f})")
 	else:
 		prob = None
@@ -144,9 +148,8 @@ async def create_signal(
 		logger.info(f"✅ Сигнал создан: {new_signal.symbol} {new_signal.direction}")
 		return new_signal
 	except SQLAlchemyError as e:
-		logger.error(f"❌ Ошибка БД при создании сигнала: {e}")
+		log_order_error("create_signal", e)
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
 
 @router.put("/{signal_id}", response_model=Signal)
 async def update_signal(signal_id: int, updated: Signal, db: AsyncSession = Depends(get_db)):

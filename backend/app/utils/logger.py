@@ -1,43 +1,38 @@
+# app/utils/logger.py
 import os
 import logging
 import json
-from logging.handlers import TimedRotatingFileHandler
+import asyncio
+from logging.config import fileConfig
 from app.services.telegram import telegram_service
-
-LOG_DIR = "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
+from app.config import settings
 
 # -------------------------------------------------------------------
-# Кастомный TelegramHandler
+# Кастомный TelegramHandler (обновлённый)
 # -------------------------------------------------------------------
 class TelegramHandler(logging.Handler):
 	"""
 	Кастомный хендлер для отправки CRITICAL ошибок в Telegram.
+	Использует run_coroutine_threadsafe для неблокирующей отправки.
 	"""
-	def __init__(self, level=logging.CRITICAL):
+	def __init__(self, telegram_id: str = None, level=logging.CRITICAL):
 		super().__init__(level)
+		# Берём ID либо из аргумента, либо из settings
+		self.telegram_id = telegram_id or settings.ADMIN_TELEGRAM_ID
 
 	def emit(self, record):
 		try:
 			log_entry = self.format(record)
-			telegram_id = os.getenv("ADMIN_TELEGRAM_ID", "")
-			if telegram_id:
-				import asyncio
+			if self.telegram_id:
 				loop = asyncio.get_event_loop()
+				coro = telegram_service.send_message_by_id(
+					telegram_id=self.telegram_id,
+					text=f"❌ CRITICAL ERROR: {log_entry}"
+				)
 				if loop.is_running():
-					asyncio.create_task(
-						telegram_service.send_message_by_id(
-							telegram_id=telegram_id,
-							text=f"❌ CRITICAL ERROR: {log_entry}"
-						)
-					)
+					asyncio.run_coroutine_threadsafe(coro, loop)
 				else:
-					loop.run_until_complete(
-						telegram_service.send_message_by_id(
-							telegram_id=telegram_id,
-							text=f"❌ CRITICAL ERROR: {log_entry}"
-						)
-					)
+					loop.run_until_complete(coro)
 		except Exception as e:
 			logging.error(f"Failed to send Telegram alert: {e}")
 
@@ -72,74 +67,20 @@ class MetricsJSONFormatter(logging.Formatter):
 		return json.dumps(log_record, ensure_ascii=False)
 
 # -------------------------------------------------------------------
-# Настройка логирования
+# Настройка логирования через logging.ini
 # -------------------------------------------------------------------
 def setup_logger():
-	formatter = logging.Formatter(
-		"%(asctime)s | %(levelname)s | %(name)s | "
-		"user_id=%(user_id)s | symbol=%(symbol)s | trade_id=%(trade_id)s | %(message)s"
-	)
+	# Загружаем конфиг из logging.ini
+	fileConfig("logging.ini", disable_existing_loggers=False)
 
-	# Общий лог
-	general_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "arkbot.log"), when="midnight", backupCount=7, encoding="utf-8"
-	)
-	general_handler.setFormatter(formatter)
-	general_handler.setLevel(logging.INFO)
-
-	# Лог ошибок
-	error_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "errors.log"), when="midnight", backupCount=7, encoding="utf-8"
-	)
-	error_handler.setFormatter(formatter)
-	error_handler.setLevel(logging.ERROR)
-
-	# Лог сделок и PnL
-	trades_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "trades.log"), when="midnight", backupCount=7, encoding="utf-8"
-	)
-	trades_handler.setFormatter(logging.Formatter(
-		"%(asctime)s | TRADE | symbol=%(symbol)s | side=%(side)s | entry=%(entry_price)s | exit=%(exit_price)s | pnl=%(profit_loss)s | sentiment=%(sentiment)s"
-	))
-	trades_handler.setLevel(logging.INFO)
-
-	# Лог риска
-	risk_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "risk.log"), when="midnight", backupCount=7, encoding="utf-8"
-	)
-	risk_handler.setFormatter(logging.Formatter(
-		"%(asctime)s | RISK | reason=%(reason)s | symbol=%(symbol)s | position_size=%(position_size)s | deposit=%(deposit)s"
-	))
-	risk_handler.setLevel(logging.WARNING)
-
-	# Лог брокера
-	broker_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "broker.log"), when="midnight", backupCount=7, encoding="utf-8"
-	)
-	broker_handler.setFormatter(logging.Formatter("%(asctime)s | BROKER | %(message)s"))
-	broker_handler.setLevel(logging.ERROR)
-
-	# Лог метрик (JSON для Prometheus)
-	metrics_handler = TimedRotatingFileHandler(
-		os.path.join(LOG_DIR, "metrics.log"), when="midnight", backupCount=7, encoding="utf-8"
-	)
-	metrics_handler.setFormatter(MetricsJSONFormatter())
-	metrics_handler.setLevel(logging.INFO)
-
-	# Telegram handler для CRITICAL ошибок
-	telegram_handler = TelegramHandler()
-	telegram_handler.setFormatter(formatter)
-	telegram_handler.setLevel(logging.CRITICAL)
-
+	# Получаем основной логгер
 	logger = logging.getLogger("arkbot")
-	logger.setLevel(logging.DEBUG)
-	logger.addHandler(general_handler)
-	logger.addHandler(error_handler)
-	logger.addHandler(trades_handler)
-	logger.addHandler(risk_handler)
-	logger.addHandler(broker_handler)
-	logger.addHandler(metrics_handler)
-	logger.addHandler(telegram_handler)
+
+	# Добавляем кастомный TelegramHandler (если не подключён через ini)
+	if not any(isinstance(h, TelegramHandler) for h in logger.handlers):
+		telegram_handler = TelegramHandler()
+		telegram_handler.setLevel(logging.CRITICAL)
+		logger.addHandler(telegram_handler)
 
 	return logger
 
@@ -158,7 +99,7 @@ async def log_critical_error(message: str, **kwargs):
 	logger.critical(message, extra=kwargs)
 	try:
 		await telegram_service.send_message_by_id(
-			telegram_id=os.getenv("ADMIN_TELEGRAM_ID", ""),
+			telegram_id=settings.ADMIN_TELEGRAM_ID,
 			text=f"❌ CRITICAL ERROR: {message}"
 		)
 	except Exception as e:

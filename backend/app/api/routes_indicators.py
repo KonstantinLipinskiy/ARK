@@ -7,7 +7,10 @@ from app.db import crud
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
 from app.services.indicator_factory import IndicatorFactory
-from app.utils.logger import logger
+from app.utils.logger import (
+	logger,
+	log_order_error,
+)  # ✅ используем централизованную функцию
 from app.utils.security import get_current_user
 from app.monitoring.prometheus import (
 	indicators_tasks_total,
@@ -63,11 +66,11 @@ async def calculate_indicator(
 
 	except ValueError as e:
 		indicators_tasks_errors.inc()
-		logger.error(f"❌ Indicator validation error: {e}")
+		log_order_error("indicator_validation", e)
 		raise HTTPException(status_code=400, detail=str(e))
 	except Exception as e:
 		indicators_tasks_errors.inc()
-		logger.error(f"❌ Failed to enqueue indicator task: {e}")
+		log_order_error("enqueue_indicator_task", e)
 		raise HTTPException(status_code=500, detail="Failed to enqueue indicator task")
 
 @router.get("/{pair}")
@@ -79,7 +82,7 @@ async def get_indicators(pair: str, db: AsyncSession = Depends(get_db)):
 		indicators = await crud.get_indicators(db, pair=pair)
 		return indicators
 	except Exception as e:
-		logger.error(f"❌ Failed to fetch indicators for {pair}: {e}")
+		log_order_error("get_indicators", e)
 		raise HTTPException(status_code=500, detail="Failed to fetch indicators")
 
 @router.get("/status/{task_id}")
@@ -94,5 +97,5 @@ async def get_indicator_status(task_id: str):
 			raise HTTPException(status_code=404, detail="Task not found")
 		return {"task_id": task_id, "status": status}
 	except Exception as e:
-		logger.error(f"❌ Failed to fetch task status: {e}")
+		log_order_error("get_indicator_status", e)
 		raise HTTPException(status_code=500, detail="Failed to fetch task status")

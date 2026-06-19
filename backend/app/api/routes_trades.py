@@ -10,8 +10,12 @@ from app.db import crud
 from app.services.telegram import send_trade_notification
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
-from app.utils.logger import logger
-from app.utils.security import get_current_user   # ✅ добавили импорт
+from app.utils.logger import (
+	logger,
+	log_order_error,
+	log_signal_rejected,
+	)  # ✅ используем централизованные функции
+from app.utils.security import get_current_user   # ✅ централизованная авторизация
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 
@@ -29,7 +33,7 @@ async def get_trades(
 	date_from: Optional[datetime] = Query(None),
 	date_to: Optional[datetime] = Query(None),
 	db: AsyncSession = Depends(get_db),
-	current_user: dict = Depends(get_current_user)   # ✅ централизованная авторизация
+	current_user: dict = Depends(get_current_user)
 ):
 	try:
 		result = await crud.get_trades(
@@ -56,7 +60,7 @@ async def get_trades(
 			"page_size": result["page_size"]
 		}
 	except SQLAlchemyError as e:
-		logger.error(f"❌ Ошибка БД при получении сделок: {e}")
+		log_order_error("get_trades", e)
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @router.get("/{trade_id}", response_model=Trade)
@@ -87,7 +91,7 @@ async def create_trade(trade: Trade, db: AsyncSession = Depends(get_db), current
 		logger.info(f"✅ Сделка создана: {new_trade.symbol} {new_trade.side}")
 		return new_trade
 	except SQLAlchemyError as e:
-		logger.error(f"❌ Ошибка БД при создании сделки: {e}")
+		log_order_error("create_trade", e)
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @router.put("/{trade_id}", response_model=Trade)

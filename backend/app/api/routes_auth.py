@@ -1,4 +1,4 @@
-#app/api/routes_auth.py
+# app/api/routes_auth.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -13,7 +13,11 @@ from app.utils.security import (
 	create_refresh_token,
 	decode_jwt_token
 )
-from app.utils.logger import logger
+from app.utils.logger import (
+	logger,
+	log_order_error,
+	log_risk_violation,
+)  # ✅ используем централизованные функции
 from app.db import crud
 from app.config import settings
 
@@ -22,13 +26,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.JWT_EXPIRE_MINUTES
 REFRESH_TOKEN_EXPIRE_DAYS = settings.REFRESH_TOKEN_EXPIRE_DAYS
 
-
 @router.post("/register", response_model=UserOut)
 async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 	result = await db.execute(select(UserORM).where(UserORM.email == user.email))
 	existing_user = result.scalar_one_or_none()
 	if existing_user:
-		logger.error(f"❌ Попытка регистрации с существующим email: {user.email}")
+		log_order_error("register", Exception(f"Попытка регистрации с существующим email: {user.email}"))
 		raise HTTPException(status_code=400, detail="User with this email already exists")
 
 	salt, password_hash = hash_password(user.password)
@@ -50,17 +53,16 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 	logger.info(f"✅ Новый пользователь зарегистрирован: {new_user.username} ({new_user.role})")
 	return new_user
 
-
 @router.post("/login")
 async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
 	result = await db.execute(select(UserORM).where(UserORM.email == credentials.email))
 	user = result.scalar_one_or_none()
 	if not user or not verify_password(credentials.password, user.salt, user.password_hash):
-		logger.error(f"❌ Ошибка входа: неверные данные для {credentials.email}")
+		log_order_error("login", Exception(f"Неверные данные для {credentials.email}"))
 		raise HTTPException(status_code=401, detail="Invalid credentials")
 
 	if user.status != "active":
-		logger.warning(f"⛔ Попытка входа заблокированного пользователя: {user.email}")
+		log_risk_violation(user.email, "Попытка входа заблокированного пользователя")
 		raise HTTPException(status_code=403, detail="User is blocked")
 
 	access_token = create_access_token(
@@ -82,17 +84,16 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
 		"token_type": "bearer"
 	}
 
-
 @router.post("/refresh")
 async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
 	payload = decode_jwt_token(refresh_token)
 	if not payload:
-		logger.warning("❌ Попытка обновления с недействительным refresh токеном")
+		log_risk_violation("refresh_token", "Попытка обновления с недействительным refresh токеном")
 		raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
 	db_token = await crud.get_refresh_token(db, refresh_token)
 	if not db_token or db_token.expires_at < datetime.utcnow():
-		logger.warning("❌ Refresh токен отсутствует в БД или истёк")
+		log_risk_violation("refresh_token", "Refresh токен отсутствует в БД или истёк")
 		raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
 	new_access_token = create_access_token(
@@ -106,12 +107,11 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
 		"token_type": "bearer"
 	}
 
-
 @router.post("/logout")
 async def logout(user_id: int, db: AsyncSession = Depends(get_db)):
 	success = await crud.delete_tokens_by_user(db, user_id)
 	if not success:
-		logger.warning(f"⚠️ Попытка logout: токены пользователя {user_id} не найдены")
+		log_risk_violation(user_id, "Попытка logout: токены пользователя не найдены")
 		raise HTTPException(status_code=404, detail="No refresh tokens found for user")
 	logger.info(f"🚪 Пользователь {user_id} вышел, refresh токены удалены")
 	return {"detail": "User logged out, refresh tokens revoked"}

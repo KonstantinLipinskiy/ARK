@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
 	TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN")
 	TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
+	ADMIN_TELEGRAM_ID: str = os.getenv("ADMIN_TELEGRAM_ID", "")  # ✅ вынесено в конфиг
 
 	TRADING_MODE: str = os.getenv("TRADING_MODE", "spot")  # spot / futures
 	USE_TESTNET: bool = os.getenv("USE_TESTNET", "false").lower() == "true"
@@ -96,6 +97,15 @@ class Settings(BaseSettings):
 	MAX_TOTAL_LOSS: float = float(os.getenv("MAX_TOTAL_LOSS", 500.0))
 	ALLOW_TEST_SIGNALS: bool = os.getenv("ALLOW_TEST_SIGNALS", "False").lower() in ("true", "1", "yes")
 
+	# --- Logging Paths ---
+	LOG_DIR: str = os.getenv("LOG_DIR", "logs")
+	ARKBOT_LOG: str = os.getenv("ARKBOT_LOG", os.path.join(LOG_DIR, "arkbot.log"))
+	ERROR_LOG: str = os.getenv("ERROR_LOG", os.path.join(LOG_DIR, "errors.log"))
+	TRADES_LOG: str = os.getenv("TRADES_LOG", os.path.join(LOG_DIR, "trades.log"))
+	RISK_LOG: str = os.getenv("RISK_LOG", os.path.join(LOG_DIR, "risk.log"))
+	BROKER_LOG: str = os.getenv("BROKER_LOG", os.path.join(LOG_DIR, "broker.log"))
+	METRICS_LOG: str = os.getenv("METRICS_LOG", os.path.join(LOG_DIR, "metrics.log"))
+
 
 settings = Settings()
 
@@ -113,6 +123,7 @@ REDIS_CONFIG = {
 	"port": int(os.getenv("REDIS_PORT", 6379)),
 	"db": int(os.getenv("REDIS_DB", 0)),
 }
+
 
 
 

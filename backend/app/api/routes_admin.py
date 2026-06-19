@@ -6,17 +6,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 from app.db.session import get_db
 from app.db.schemas import UserORM, TradeORM, SignalORM, StrategyORM
-from app.services.exchange import load_strategies   # ✅ централизованный источник
+from app.services.exchange import load_strategies
 from app.services.strategy_service import add_strategy, update_strategy, delete_strategy, toggle_strategy
 from app.services.risk_service import load_risk_settings, update_risk_settings
 from app.utils.security import get_current_admin
-from app.utils.logger import logger
+from app.utils.logger import (
+	logger,
+	log_order_error,
+)  # ✅ используем централизованную функцию
 from app.utils.metrics import calculate_metrics
 from app.services.telegram import telegram_service
 
-
 router = APIRouter(prefix="/admin", tags=["admin"])
-
 
 @router.get("/stats")
 async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
@@ -50,9 +51,8 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 		logger.info("📊 Админ: статистика собрана")
 		return stats
 	except SQLAlchemyError as e:
-		logger.error(f"❌ Ошибка БД при получении статистики: {e}")
+		log_order_error("get_stats", e)
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
 
 @router.post("/block_user/{user_id}")
 async def block_user(user_id: int, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
@@ -69,14 +69,12 @@ async def block_user(user_id: int, db: AsyncSession = Depends(get_db), current_a
 		return {"detail": f"User {user_id} blocked"}
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"❌ Ошибка БД при блокировке пользователя: {e}")
+		log_order_error("block_user", e)
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
 
 @router.get("/strategies")
 async def get_strategies(db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	return await load_strategies(db, use_cache=False)
-
 
 @router.post("/strategies")
 async def create_strategy(strategy_data: dict, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
@@ -86,7 +84,6 @@ async def create_strategy(strategy_data: dict, db: AsyncSession = Depends(get_db
 	logger.info(f"✅ Стратегия {strategy.symbol} добавлена админом")
 	return {"detail": f"Strategy {strategy.symbol} added"}
 
-
 @router.put("/strategies/{symbol}")
 async def edit_strategy(symbol: str, updates: dict, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	strategy = await update_strategy(db, symbol, updates)
@@ -95,7 +92,6 @@ async def edit_strategy(symbol: str, updates: dict, db: AsyncSession = Depends(g
 	logger.info(f"♻️ Стратегия {symbol} обновлена админом")
 	return {"detail": f"Strategy {symbol} updated"}
 
-
 @router.delete("/strategies/{symbol}")
 async def remove_strategy(symbol: str, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	success = await delete_strategy(db, symbol)
@@ -103,7 +99,6 @@ async def remove_strategy(symbol: str, db: AsyncSession = Depends(get_db), curre
 		raise HTTPException(status_code=404, detail="Strategy not found")
 	logger.info(f"🗑️ Стратегия {symbol} удалена админом")
 	return {"detail": f"Strategy {symbol} deleted"}
-
 
 @router.post("/strategies/{symbol}/toggle")
 async def toggle_strategy_endpoint(symbol: str, enabled: bool, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
@@ -114,11 +109,9 @@ async def toggle_strategy_endpoint(symbol: str, enabled: bool, db: AsyncSession 
 	logger.info(f"🔀 Стратегия {symbol} переключена: {status}")
 	return {"detail": f"Strategy {symbol} {status}"}
 
-
 @router.get("/risk")
 async def get_risk(db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	return await load_risk_settings(db)
-
 
 @router.put("/risk")
 async def update_risk(updates: dict, db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
