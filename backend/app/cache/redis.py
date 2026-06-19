@@ -1,5 +1,6 @@
 # app/cache/redis.py
 import json
+import time
 from redis.asyncio import Redis
 from app.utils.logger import logger
 from app.config import REDIS_CONFIG
@@ -28,8 +29,8 @@ class RedisCache:
 		try:
 			data = await self.client.get(key)
 			if data:
-					logger.debug(f"✅ Redis get: {key}")
-					return json.loads(data)
+				logger.debug(f"✅ Redis get: {key}")
+				return json.loads(data)
 			return None
 		except Exception as e:
 			logger.error(f"❌ Redis get error: {e}")
@@ -99,7 +100,7 @@ class RedisCache:
 			return []
 
 	async def health_check(self) -> bool:
-		"""Проверка доступности Redis."""
+		"""Проверка доступности Redis (ping)."""
 		try:
 			pong = await self.client.ping()
 			logger.debug("✅ Redis health check: PONG")
@@ -107,6 +108,23 @@ class RedisCache:
 		except Exception as e:
 			logger.error(f"❌ Redis health check failed: {e}")
 			return False
+
+	async def ping_latency(self) -> float:
+		"""
+		Измеряет latency ответа Redis (ping).
+		Возвращает время в секундах или -1.0 при ошибке.
+		"""
+		try:
+			start = time.time()
+			pong = await self.client.ping()
+			elapsed = round(time.time() - start, 3)
+			if pong:
+				logger.debug(f"⏱️ Redis latency: {elapsed}s")
+				return elapsed
+			return -1.0
+		except Exception as e:
+			logger.error(f"❌ Redis ping_latency error: {e}")
+			return -1.0
 
 	async def switch_db(self, db: int):
 		"""Переключение на другую базу Redis."""
@@ -136,8 +154,8 @@ class RedisCache:
 		try:
 			data = await self.client.get(f"indicator:{task_id}:status")
 			if data:
-					logger.debug(f"📊 Redis task status get: {task_id}")
-					return json.loads(data)
+				logger.debug(f"📊 Redis task status get: {task_id}")
+				return json.loads(data)
 			return None
 		except Exception as e:
 			logger.error(f"❌ Redis get_task_status error: {e}")

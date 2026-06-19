@@ -3,7 +3,7 @@ from fastapi import APIRouter, Response, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
-from prometheus_client import Gauge, Counter, Histogram, generate_latest
+from prometheus_client import Gauge, Counter, Histogram, Summary, generate_latest
 from app.db.session import get_db
 from app.db.schemas import TradeORM, SignalORM, TradeStatus
 from app.utils.metrics import (
@@ -19,11 +19,10 @@ from app.utils.metrics import (
 	ml_cv_precision,
 	ml_cv_recall,
 	ml_cv_loss,
-	ml_training_runs_total,      # ✅ количество запусков обучения
-	ml_predictions_total,        # ✅ количество предсказаний
-	ml_prediction_confidence     # ✅ распределение confidence score
-	)
-
+	ml_training_runs_total,
+	ml_predictions_total,
+	ml_prediction_confidence
+)
 
 from app.broker.rabbitmq import RabbitMQBroker
 from app.cache.redis import RedisCache
@@ -60,14 +59,15 @@ signals_buy_total = Gauge("signals_buy_total", "Total number of BUY signals")
 signals_sell_total = Gauge("signals_sell_total", "Total number of SELL signals")
 
 # 🔹 Метрики Prometheus (RabbitMQ)
-rabbitmq_messages_published = Counter("rabbitmq_messages_published_total", "Total messages published to RabbitMQ")
-rabbitmq_messages_consumed = Counter("rabbitmq_messages_consumed_total", "Total messages consumed from RabbitMQ")
-rabbitmq_errors_total = Counter("rabbitmq_errors_total", "Total RabbitMQ errors")
+rabbitmq_messages_published = Gauge("rabbitmq_messages_published_total", "Total messages published to RabbitMQ")
+rabbitmq_messages_consumed = Gauge("rabbitmq_messages_consumed_total", "Total messages consumed from RabbitMQ")
+rabbitmq_errors_total = Gauge("rabbitmq_errors_total", "Total RabbitMQ errors")
 rabbitmq_processing_time = Histogram("rabbitmq_processing_time_seconds", "Message processing time in RabbitMQ")
 
 # 🔹 Метрики Prometheus (Redis)
 redis_keys_total = Gauge("redis_keys_total", "Total number of keys in Redis")
 redis_latency_seconds = Histogram("redis_latency_seconds", "Redis latency in seconds")
+redis_latency_summary = Summary("redis_latency_summary_seconds", "Redis latency summary in seconds")
 
 # 🔹 Метрики Prometheus (Индикаторы)
 indicators_tasks_total = Gauge("indicators_tasks_total", "Total indicator tasks queued")
@@ -75,13 +75,16 @@ indicators_tasks_errors = Counter("indicators_tasks_errors_total", "Total indica
 indicators_task_duration = Histogram("indicators_task_duration_seconds", "Indicator task execution time")
 indicators_queue_time = Histogram("indicators_queue_time_seconds", "Indicator task queue time")
 
-# 🔹 Эндпоинт /metrics
 @router.get("/metrics")
 async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
+	"""
+	Эндпоинт /metrics:
+	Собирает метрики торговли, сделок, сигналов, ML обучения,
+	RabbitMQ, Redis, индикаторов и Qdrant, и экспортирует их в Prometheus.
+	"""
 	# --- Метрики торговли ---
 	result = await db.execute(select(TradeORM))
 	trades = result.scalars().all()
-
 	stats = calculate_metrics(trades)
 
 	winrate_gauge.set(stats["winrate"])
@@ -131,19 +134,16 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	)
 	signals_sell_total.set(sell_signals or 0)
 
-	# --- Метрики ML обучения ---
-	# ml_accuracy и ml_loss обновляются при обучении через utils/metrics.py
-
 	# --- Метрики RabbitMQ ---
 	broker = RabbitMQBroker()
 	try:
 		metrics = broker.get_metrics()
-		rabbitmq_messages_published.inc(metrics["messages_published"])
-		rabbitmq_messages_consumed.inc(metrics["messages_consumed"])
-		rabbitmq_errors_total.inc(metrics["errors_total"])
+		rabbitmq_messages_published.set(metrics["messages_published"])
+		rabbitmq_messages_consumed.set(metrics["messages_consumed"])
+		rabbitmq_errors_total.set(metrics["errors_total"])
 		rabbitmq_processing_time.observe(metrics["avg_processing_time"])
 	except Exception:
-		rabbitmq_errors_total.inc()
+		rabbitmq_errors_total.set(1)
 
 	# --- Метрики Redis ---
 	redis = RedisCache()
@@ -157,6 +157,7 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		elapsed = round(time.time() - start, 3)
 		if pong:
 			redis_latency_seconds.observe(elapsed)
+			redis_latency_summary.observe(elapsed)
 	except Exception:
 		redis_keys_total.set(0)
 
@@ -171,15 +172,20 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	try:
 		vector_db = VectorDB()
 		VECTOR_POINTS_TOTAL.labels(collection=vector_db.collection_name).set(vector_db.count_points())
-		# Поиск/ошибки/latency обновляются автоматически внутри vector.py
+		latency = vector_db.get_last_search_latency()
+		if latency:
+			VECTOR_SEARCH_LATENCY.labels(collection=vector_db.collection_name).observe(latency)
 	except Exception:
 		VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="metrics").inc()
 
 	return Response(generate_latest(), media_type="text/plain")
 
-# 🔹 Логирование ошибок
 def log_error():
+	"""
+	Универсальная функция логирования ошибок:
+	увеличивает счётчики ошибок для торговли, RabbitMQ, индикаторов и Qdrant.
+	"""
 	errors_counter.inc()
-	rabbitmq_errors_total.inc()
+	rabbitmq_errors_total.set(1)
 	indicators_tasks_errors.inc()
 	VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="general").inc()

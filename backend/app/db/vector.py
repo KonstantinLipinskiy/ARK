@@ -4,6 +4,7 @@ from qdrant_client.http import models
 from app.utils.logger import logger
 from prometheus_client import Gauge, Counter, Histogram
 from app.config import settings
+import time
 
 VECTOR_POINTS_TOTAL = Gauge("vector_points_total", "Total points in Qdrant collection", ["collection"])
 VECTOR_SEARCH_TOTAL = Counter("vector_search_total", "Total search queries in Qdrant", ["collection"])
@@ -17,7 +18,6 @@ class VectorDB:
 				host=settings.QDRANT_HOST,
 				port=settings.QDRANT_PORT
 			)
-			# гибкая настройка коллекции: если не указано явно, берём из конфига
 			self.collection_name = collection_name or settings.QDRANT_COLLECTION
 			self.vector_size = settings.QDRANT_VECTOR_SIZE
 			self.distance_metric = getattr(models.Distance, settings.QDRANT_DISTANCE)
@@ -58,11 +58,13 @@ class VectorDB:
 				logger.warning(f"Пропуск вставки: пустой или None vector для id={payload.get('id')}")
 				return {"status": "skipped", "reason": "invalid vector"}
 
+			start = time.time()
 			self.client.upsert(
 				collection_name=self.collection_name,
 				points=[models.PointStruct(id=payload.get("id"), vector=vector, payload=payload)]
 			)
-			logger.info(f"Эмбеддинг вставлен: {payload}")
+			elapsed = round(time.time() - start, 3)
+			logger.info(f"Эмбеддинг вставлен: {payload} (elapsed {elapsed}s)")
 			VECTOR_POINTS_TOTAL.labels(collection=self.collection_name).set(self.count_points())
 		except Exception as e:
 			logger.error(f"Ошибка вставки эмбеддинга: {e}")
@@ -86,8 +88,10 @@ class VectorDB:
 				logger.warning("Batch insert пропущен: нет валидных точек")
 				return {"status": "skipped", "reason": "no valid points"}
 
+			start = time.time()
 			self.client.upsert(collection_name=self.collection_name, points=points)
-			logger.info(f"Batch insert: {len(points)} эмбеддингов")
+			elapsed = round(time.time() - start, 3)
+			logger.info(f"Batch insert: {len(points)} эмбеддингов (elapsed {elapsed}s)")
 			VECTOR_POINTS_TOTAL.labels(collection=self.collection_name).set(self.count_points())
 		except Exception as e:
 			logger.error(f"Ошибка batch insert: {e}")
@@ -115,13 +119,16 @@ class VectorDB:
 			if query_vector is None or len(query_vector) == 0:
 				logger.warning("Поиск пропущен: пустой query_vector")
 				return []
-			with VECTOR_SEARCH_LATENCY.labels(collection=self.collection_name).time():
-				results = self.client.search(
-					collection_name=self.collection_name,
-					query_vector=query_vector,
-					limit=top_k
-				)
+			start = time.time()
+			results = self.client.search(
+				collection_name=self.collection_name,
+				query_vector=query_vector,
+				limit=top_k
+			)
+			elapsed = round(time.time() - start, 3)
+			VECTOR_SEARCH_LATENCY.labels(collection=self.collection_name).observe(elapsed)
 			VECTOR_SEARCH_TOTAL.labels(collection=self.collection_name).inc()
+			logger.debug(f"🔎 Qdrant search latency: {elapsed}s")
 			return results
 		except Exception as e:
 			logger.error(f"Ошибка поиска: {e}")
@@ -137,14 +144,17 @@ class VectorDB:
 			qdrant_filter = models.Filter(
 				must=[models.FieldCondition(key=k, match=models.MatchValue(value=v)) for k, v in filters.items()]
 			)
-			with VECTOR_SEARCH_LATENCY.labels(collection=self.collection_name).time():
-				results = self.client.search(
-					collection_name=self.collection_name,
-					query_vector=query_vector,
-					limit=top_k,
-					query_filter=qdrant_filter
-				)
+			start = time.time()
+			results = self.client.search(
+				collection_name=self.collection_name,
+				query_vector=query_vector,
+				limit=top_k,
+				query_filter=qdrant_filter
+			)
+			elapsed = round(time.time() - start, 3)
+			VECTOR_SEARCH_LATENCY.labels(collection=self.collection_name).observe(elapsed)
 			VECTOR_SEARCH_TOTAL.labels(collection=self.collection_name).inc()
+			logger.debug(f"🔎 Qdrant search_with_filter latency: {elapsed}s")
 			return results
 		except Exception as e:
 			logger.error(f"Ошибка поиска с фильтром: {e}")

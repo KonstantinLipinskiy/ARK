@@ -229,11 +229,14 @@ def export_cv_metrics(metrics: Dict[str, float]):
 	except Exception as e:
 		print(f"❌ Ошибка экспорта CV метрик: {e}")
 
-
 # --- Auto Logging Metrics (Prometheus) ---
 ml_training_runs_total = Counter("ml_training_runs_total", "Количество запусков обучения ML моделей")
 ml_predictions_total = Counter("ml_predictions_total", "Количество предсказаний ML моделей")
 ml_prediction_confidence = Histogram("ml_prediction_confidence", "Распределение confidence score предсказаний")
+
+# 🔹 Новые метрики для latency и ошибок
+ml_prediction_latency = Histogram("ml_prediction_latency_seconds", "Latency of ML predictions")
+ml_errors_total = Counter("ml_errors_total", "Количество ошибок ML обучения/предсказаний")
 
 def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[float]] = None,
 						training_time: Optional[float] = None, learning_rate: Optional[float] = None):
@@ -251,17 +254,22 @@ def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[floa
 		if learning_rate is not None:
 			ml_learning_rate.set(learning_rate)
 	except Exception as e:
+		ml_errors_total.inc()
 		print(f"❌ Ошибка логирования обучения: {e}")
 
-	def log_prediction(features: Dict[str, float], result: Dict[str, float], confidence: float):
-		"""
-		Логирование предсказания модели.
-		features: входные признаки
-		result: словарь с результатами предсказания (например, success_probability)
-		confidence: confidence score
-		"""
-		try:
-			ml_predictions_total.inc()
-			ml_prediction_confidence.observe(confidence)
-		except Exception as e:
-			print(f"❌ Ошибка логирования предсказания: {e}")
+def log_prediction(features: Dict[str, float], result: Dict[str, float], confidence: float, latency: Optional[float] = None):
+	"""
+	Логирование предсказания модели.
+	features: входные признаки
+	result: словарь с результатами предсказания (например, success_probability)
+	confidence: confidence score
+	latency: время выполнения предсказания (секунды)
+	"""
+	try:
+		ml_predictions_total.inc()
+		ml_prediction_confidence.observe(confidence)
+		if latency is not None:
+			ml_prediction_latency.observe(latency)
+	except Exception as e:
+		ml_errors_total.inc()
+		print(f"❌ Ошибка логирования предсказания: {e}")

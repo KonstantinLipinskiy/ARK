@@ -47,17 +47,17 @@ class RabbitMQBroker:
 
 			# Exchange (direct, fanout, topic)
 			self.exchange = await self.channel.declare_exchange(
-					"app_exchange", type=self.exchange_type, durable=True
+				"app_exchange", type=self.exchange_type, durable=True
 			)
 
 			# Очереди
 			for q in [
-					self.queue_signals, self.queue_trades, self.queue_indicators,
-					self.queue_telegram, self.queue_backtest, self.queue_agents,
-					self.queue_reports, self.queue_alerts, self.queue_logs
+				self.queue_signals, self.queue_trades, self.queue_indicators,
+				self.queue_telegram, self.queue_backtest, self.queue_agents,
+				self.queue_reports, self.queue_alerts, self.queue_logs
 			]:
-					await self.channel.declare_queue(q, durable=True)
-					await self.exchange.bind(q, routing_key=q)
+				await self.channel.declare_queue(q, durable=True)
+				await self.exchange.bind(q, routing_key=q)
 
 			logger.info("✅ RabbitMQ connected, exchange declared and queues bound")
 		except Exception as e:
@@ -97,27 +97,27 @@ class RabbitMQBroker:
 		attempt = 0
 		while attempt <= retries:
 			try:
-					start = time.time()
-					await self.exchange.publish(
-						aio_pika.Message(
-							body=str(payload).encode(),
-							delivery_mode=aio_pika.DeliveryMode.PERSISTENT
-						),
-						routing_key=queue_name
-					)
-					elapsed = round(time.time() - start, 3)
-					self.messages_published += 1
-					self.processing_times.append(elapsed)
-					logger.debug(f"📤 {label} published: {payload} (elapsed {elapsed}s)")
-					return
+				start = time.time()
+				await self.exchange.publish(
+					aio_pika.Message(
+						body=str(payload).encode(),
+						delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+					),
+					routing_key=queue_name
+				)
+				elapsed = round(time.time() - start, 3)
+				self.messages_published += 1
+				self.processing_times.append(elapsed)
+				logger.debug(f"📤 {label} published: {payload} (elapsed {elapsed}s)")
+				return
 			except Exception as e:
-					self.errors_total += 1
-					attempt += 1
-					logger.error(f"❌ Failed to publish {label} (attempt {attempt}): {e}")
-					if attempt > retries:
-						logger.error(f"❌ Publish {label} failed after {retries+1} attempts")
-						return
-					await asyncio.sleep(2 ** attempt)  # экспоненциальная задержка
+				self.errors_total += 1
+				attempt += 1
+				logger.error(f"❌ Failed to publish {label} (attempt {attempt}): {e}")
+				if attempt > retries:
+					logger.error(f"❌ Publish {label} failed after {retries+1} attempts")
+					return
+				await asyncio.sleep(2 ** attempt)  # экспоненциальная задержка
 
 	# --- Получение сообщений ---
 	async def consume_signals(self, callback):
@@ -151,29 +151,29 @@ class RabbitMQBroker:
 		attempt = 0
 		while attempt <= retries:
 			try:
-					queue = await self.channel.declare_queue(queue_name, durable=True)
-					async with queue.iterator() as q:
-						async for message in q:
-							async with message.process():
-									try:
-										start = time.time()
-										await callback(message.body.decode())
-										elapsed = round(time.time() - start, 3)
-										self.messages_consumed += 1
-										self.processing_times.append(elapsed)
-										logger.debug(f"📥 {label} consumed: {message.body.decode()} (elapsed {elapsed}s)")
-									except Exception as e:
-										self.errors_total += 1
-										logger.error(f"❌ Error processing {label}: {e}")
-					return
+				queue = await self.channel.declare_queue(queue_name, durable=True)
+				async with queue.iterator() as q:
+					async for message in q:
+						async with message.process():
+							try:
+								start = time.time()
+								await callback(message.body.decode())
+								elapsed = round(time.time() - start, 3)
+								self.messages_consumed += 1
+								self.processing_times.append(elapsed)
+								logger.debug(f"📥 {label} consumed: {message.body.decode()} (elapsed {elapsed}s)")
+							except Exception as e:
+								self.errors_total += 1
+								logger.error(f"❌ Error processing {label}: {e}")
+				return
 			except Exception as e:
-					self.errors_total += 1
-					attempt += 1
-					logger.error(f"❌ Failed to consume {label} (attempt {attempt}): {e}")
-					if attempt > retries:
-						logger.error(f"❌ Consume {label} failed after {retries+1} attempts")
-						return
-					await asyncio.sleep(2 ** attempt)
+				self.errors_total += 1
+				attempt += 1
+				logger.error(f"❌ Failed to consume {label} (attempt {attempt}): {e}")
+				if attempt > retries:
+					logger.error(f"❌ Consume {label} failed after {retries+1} attempts")
+					return
+				await asyncio.sleep(2 ** attempt)
 
 	async def close(self):
 		if self.connection:
@@ -182,11 +182,19 @@ class RabbitMQBroker:
 
 	# --- Метрики ---
 	def get_metrics(self) -> dict:
-		"""Возвращает базовые метрики для мониторинга."""
+		"""
+		Возвращает актуальные метрики для мониторинга RabbitMQ.
+		Используется в prometheus.py для экспорта в Prometheus.
+		"""
+		avg_time = round(sum(self.processing_times) / len(self.processing_times), 3) if self.processing_times else 0
+		last_time = round(self.processing_times[-1], 3) if self.processing_times else 0
+		max_time = round(max(self.processing_times), 3) if self.processing_times else 0
+
 		return {
 			"messages_published": self.messages_published,
 			"messages_consumed": self.messages_consumed,
 			"errors_total": self.errors_total,
-			"avg_processing_time": round(sum(self.processing_times) / len(self.processing_times), 3)
-			if self.processing_times else 0
+			"avg_processing_time": avg_time,
+			"last_processing_time": last_time,
+			"max_processing_time": max_time
 		}
