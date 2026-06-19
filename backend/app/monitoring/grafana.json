@@ -192,8 +192,18 @@
       },
       {
         "type": "graph",
-        "title": "Redis Latency",
+        "title": "Redis Errors",
+        "targets": [{ "expr": "redis_errors_total" }]
+      },
+      {
+        "type": "graph",
+        "title": "Redis Latency (Avg)",
         "targets": [{ "expr": "redis_latency_seconds" }]
+      },
+      {
+        "type": "graph",
+        "title": "Redis Ping Latency (Last)",
+        "targets": [{ "expr": "redis_latency_summary_seconds" }]
       },
       {
         "type": "graph",

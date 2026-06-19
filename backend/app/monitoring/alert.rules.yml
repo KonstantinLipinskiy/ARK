@@ -49,7 +49,7 @@ groups:
           description: "Количество ошибок RabbitMQ превысило 5 за последние 5 минут."
 
       - alert: RabbitMQSlowProcessing
-        expr: rabbitmq_processing_time_seconds > 2
+        expr: rabbitmq_processing_time_avg_seconds > 2
         for: 5m
         labels:
           severity: warning
@@ -58,7 +58,7 @@ groups:
           description: "Среднее время обработки сообщений RabbitMQ превысило 2 секунды."
 
       - alert: RabbitMQMaxProcessingTime
-        expr: rabbitmq_processing_time_seconds > 5
+        expr: rabbitmq_processing_time_max_seconds > 5
         for: 5m
         labels:
           severity: critical
@@ -67,6 +67,15 @@ groups:
           description: "Максимальное время обработки сообщений превысило 5 секунд."
 
       # --- Метрики Redis ---
+      - alert: RedisHighErrors
+        expr: redis_errors_total > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ошибки Redis"
+          description: "Количество ошибок Redis превысило 5 за последние 5 минут."
+
       - alert: RedisHighLatency
         expr: redis_latency_seconds > 0.5
         for: 5m
@@ -74,7 +83,7 @@ groups:
           severity: warning
         annotations:
           summary: "Высокая задержка Redis"
-          description: "Задержка Redis превысила 0.5 секунд."
+          description: "Средняя задержка Redis превысила 0.5 секунд."
 
       - alert: RedisPingLatency
         expr: redis_latency_summary_seconds > 0.5
@@ -83,7 +92,7 @@ groups:
           severity: warning
         annotations:
           summary: "Redis ping latency высокая"
-          description: "Время ответа Redis превысило 0.5 секунд."
+          description: "Последний ping Redis превысил 0.5 секунд."
 
       - alert: RedisNoKeys
         expr: redis_keys_total == 0

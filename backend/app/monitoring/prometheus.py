@@ -67,6 +67,7 @@ rabbitmq_processing_time_max = Histogram("rabbitmq_processing_time_max_seconds",
 
 # 🔹 Метрики Prometheus (Redis)
 redis_keys_total = Gauge("redis_keys_total", "Total number of keys in Redis")
+redis_errors_total = Gauge("redis_errors_total", "Total Redis errors (current value from cache)")
 redis_latency_seconds = Histogram("redis_latency_seconds", "Redis latency in seconds")
 redis_latency_summary = Summary("redis_latency_summary_seconds", "Redis latency summary in seconds")
 
@@ -150,18 +151,14 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	# --- Метрики Redis ---
 	redis = RedisCache()
 	try:
-		keys = await redis.keys("*")
-		redis_keys_total.set(len(keys))
-
-		import time
-		start = time.time()
-		pong = await redis.health_check()
-		elapsed = round(time.time() - start, 3)
-		if pong:
-			redis_latency_seconds.observe(elapsed)
-			redis_latency_summary.observe(elapsed)
+		metrics = redis.get_metrics()
+		redis_keys_total.set(metrics["keys_total"])
+		redis_errors_total.set(metrics["errors_total"])
+		redis_latency_seconds.observe(metrics["avg_latency"])
+		redis_latency_summary.observe(metrics["last_latency"])
 	except Exception:
 		redis_keys_total.set(0)
+		redis_errors_total.set(0)
 
 	# --- Метрики индикаторов ---
 	try:

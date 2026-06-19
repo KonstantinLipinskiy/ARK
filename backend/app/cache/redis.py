@@ -16,12 +16,18 @@ class RedisCache:
 		self.db = db
 		self.client = Redis(host=host, port=port, db=db, decode_responses=True)
 
+		# --- Метрики ---
+		self.errors_total = 0
+		self.latencies = []
+		self.keys_total = 0
+
 	async def set(self, key: str, value: dict, expire: int = 60):
 		"""Сохраняет данные в Redis с TTL."""
 		try:
 			await self.client.set(key, json.dumps(value), ex=expire)
 			logger.debug(f"✅ Redis set: {key} → {value}")
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis set error: {e}")
 
 	async def get(self, key: str) -> dict | None:
@@ -33,6 +39,7 @@ class RedisCache:
 				return json.loads(data)
 			return None
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis get error: {e}")
 			return None
 
@@ -50,6 +57,7 @@ class RedisCache:
 			await self.client.delete(key)
 			logger.debug(f"🗑️ Redis delete: {key}")
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis delete error: {e}")
 
 	async def publish(self, channel: str, message: dict):
@@ -58,6 +66,7 @@ class RedisCache:
 			await self.client.publish(channel, json.dumps(message))
 			logger.debug(f"📤 Redis publish to {channel}: {message}")
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis publish error: {e}")
 
 	async def subscribe(self, channel: str):
@@ -68,6 +77,7 @@ class RedisCache:
 			logger.info(f"📥 Redis subscribed to channel: {channel}")
 			return pubsub
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis subscribe error: {e}")
 			return None
 
@@ -78,6 +88,7 @@ class RedisCache:
 			logger.debug(f"🔎 Redis exists: {key} → {result > 0}")
 			return result > 0
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis exists error: {e}")
 			return False
 
@@ -87,15 +98,18 @@ class RedisCache:
 			await self.client.flushdb()
 			logger.warning("⚠️ Redis flush: database cleared")
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis flush error: {e}")
 
 	async def keys(self, pattern: str = "*") -> list[str]:
 		"""Получение списка ключей по шаблону."""
 		try:
 			result = await self.client.keys(pattern)
+			self.keys_total = len(result)
 			logger.debug(f"🔑 Redis keys: {result}")
 			return result
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis keys error: {e}")
 			return []
 
@@ -106,6 +120,7 @@ class RedisCache:
 			logger.debug("✅ Redis health check: PONG")
 			return pong
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis health check failed: {e}")
 			return False
 
@@ -119,10 +134,12 @@ class RedisCache:
 			pong = await self.client.ping()
 			elapsed = round(time.time() - start, 3)
 			if pong:
+				self.latencies.append(elapsed)
 				logger.debug(f"⏱️ Redis latency: {elapsed}s")
 				return elapsed
 			return -1.0
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis ping_latency error: {e}")
 			return -1.0
 
@@ -133,18 +150,30 @@ class RedisCache:
 			self.client = Redis(host=self.host, port=self.port, db=db, decode_responses=True)
 			logger.info(f"🔄 Redis switched to DB {db}")
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis switch_db error: {e}")
+
+	async def close(self):
+		"""Закрытие соединения Redis."""
+		try:
+			await self.client.close()
+			logger.info("🔌 Redis connection closed")
+		except Exception as e:
+			self.errors_total += 1
+			logger.error(f"❌ Redis close error: {e}")
 
 	# ---------- Indicator Tasks ----------
 	async def set_task_status(self, task_id: str, status: str, expire: int = 300):
 		"""
 		Сохраняет статус задачи индикатора (queued, done, error).
+		Добавлено поле updated_at (timestamp).
 		"""
 		try:
-			value = {"status": status}
+			value = {"status": status, "updated_at": time.time()}
 			await self.client.set(f"indicator:{task_id}:status", json.dumps(value), ex=expire)
 			logger.debug(f"📊 Redis task status set: {task_id} → {status}")
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis set_task_status error: {e}")
 
 	async def get_task_status(self, task_id: str) -> dict | None:
@@ -158,5 +187,24 @@ class RedisCache:
 				return json.loads(data)
 			return None
 		except Exception as e:
+			self.errors_total += 1
 			logger.error(f"❌ Redis get_task_status error: {e}")
 			return None
+
+	# ---------- Метрики ----------
+	def get_metrics(self) -> dict:
+		"""
+		Возвращает актуальные метрики для мониторинга Redis.
+		Используется в prometheus.py для экспорта в Prometheus.
+		"""
+		avg_latency = round(sum(self.latencies) / len(self.latencies), 3) if self.latencies else 0
+		last_latency = round(self.latencies[-1], 3) if self.latencies else 0
+		max_latency = round(max(self.latencies), 3) if self.latencies else 0
+
+		return {
+			"errors_total": self.errors_total,
+			"keys_total": self.keys_total,
+			"avg_latency": avg_latency,
+			"last_latency": last_latency,
+			"max_latency": max_latency
+		}
