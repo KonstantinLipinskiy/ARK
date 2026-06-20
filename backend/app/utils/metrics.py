@@ -1,8 +1,10 @@
+# app/utils/metrics.py
 from typing import List, Dict, Union, Optional
 import math
 import asyncio
 from prometheus_client import Gauge, Counter, Histogram
 import numpy as np
+from app.utils.logger import logger, metrics_logger
 
 # --- Trading Metrics ---
 def _extract_profit(trade: Union[Dict, object]) -> float:
@@ -112,25 +114,29 @@ ml_recall = Gauge("ml_training_recall", "Recall of ML training")
 def get_accuracy() -> float:
 	try:
 		return ml_accuracy._value.get() or 0.0
-	except Exception:
+	except Exception as e:
+		metrics_logger.error(f"❌ Ошибка получения accuracy: {e}")
 		return 0.0
 
 def get_loss() -> float:
 	try:
 		return ml_loss._value.get() or 0.0
-	except Exception:
+	except Exception as e:
+		metrics_logger.error(f"❌ Ошибка получения loss: {e}")
 		return 0.0
 
 def get_precision() -> float:
 	try:
 		return ml_precision._value.get() or 0.0
-	except Exception:
+	except Exception as e:
+		metrics_logger.error(f"❌ Ошибка получения precision: {e}")
 		return 0.0
 
 def get_recall() -> float:
 	try:
 		return ml_recall._value.get() or 0.0
-	except Exception:
+	except Exception as e:
+		metrics_logger.error(f"❌ Ошибка получения recall: {e}")
 		return 0.0
 
 # --- Agent Metrics (Prometheus) ---
@@ -143,16 +149,12 @@ REPORT_SEARCH_ACCURACY = Gauge("report_search_accuracy", "Точность по�
 REPORT_LATENCY_HISTOGRAM = Histogram("report_latency_seconds", "Распределение времени ответа отчётов")
 
 def export_report_metrics(search_accuracy: float, latency: float):
-	"""
-	Экспорт метрик отчётов в Prometheus.
-	search_accuracy: процент релевантных документов (0.0–1.0)
-	latency: время ответа в секундах
-	"""
 	try:
 		REPORT_SEARCH_ACCURACY.set(search_accuracy)
 		REPORT_LATENCY_HISTOGRAM.observe(latency)
+		metrics_logger.info(f"✅ Экспорт метрик отчётов: accuracy={search_accuracy}, latency={latency}")
 	except Exception as e:
-		print(f"❌ Ошибка экспорта метрик отчётов: {e}")
+		metrics_logger.error(f"❌ Ошибка экспорта метрик отчётов: {e}")
 
 # --- ML Training Extended Metrics ---
 ml_epoch_loss = Histogram("ml_training_epoch_loss", "Loss per epoch during ML training")
@@ -160,13 +162,6 @@ ml_training_time = Gauge("ml_training_time_seconds", "Total training time in sec
 ml_learning_rate = Gauge("ml_training_learning_rate", "Learning rate used in training")
 
 def export_ml_metrics(metrics: Dict[str, float], epoch_losses: Optional[List[float]] = None, training_time: Optional[float] = None, learning_rate: Optional[float] = None):
-	"""
-	Экспорт метрик обучения ML модели в Prometheus.
-	metrics: словарь с ключами accuracy, loss, precision, recall
-	epoch_losses: список значений loss по эпохам
-	training_time: общее время обучения в секундах
-	learning_rate: использованный learning rate
-	"""
 	try:
 		if "accuracy" in metrics and metrics["accuracy"] is not None:
 			ml_accuracy.set(metrics["accuracy"])
@@ -184,8 +179,9 @@ def export_ml_metrics(metrics: Dict[str, float], epoch_losses: Optional[List[flo
 			ml_training_time.set(training_time)
 		if learning_rate is not None:
 			ml_learning_rate.set(learning_rate)
+		metrics_logger.info(f"✅ Экспорт ML метрик: {metrics}, training_time={training_time}, lr={learning_rate}")
 	except Exception as e:
-		print(f"❌ Ошибка экспорта ML метрик: {e}")
+		metrics_logger.error(f"❌ Ошибка экспорта ML метрик: {e}")
 
 # --- ML Cross-Validation Metrics (Prometheus) ---
 ml_cv_accuracy = Gauge("ml_cv_accuracy", "Average accuracy across CV folds")
@@ -226,8 +222,9 @@ def export_cv_metrics(metrics: Dict[str, float]):
 			ml_cv_recall.set(metrics["recall"])
 		if "loss" in metrics and metrics["loss"] is not None:
 			ml_cv_loss.set(metrics["loss"])
+		metrics_logger.info(f"✅ Экспорт CV метрик: {metrics}")
 	except Exception as e:
-		print(f"❌ Ошибка экспорта CV метрик: {e}")
+		metrics_logger.error(f"❌ Ошибка экспорта CV метрик: {e}")
 
 # --- Auto Logging Metrics (Prometheus) ---
 ml_training_runs_total = Counter("ml_training_runs_total", "Количество запусков обучения ML моделей")
@@ -253,9 +250,10 @@ def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[floa
 			ml_training_time.set(training_time)
 		if learning_rate is not None:
 			ml_learning_rate.set(learning_rate)
+		metrics_logger.info(f"✅ Логирование обучения: {metrics}, training_time={training_time}, lr={learning_rate}")
 	except Exception as e:
 		ml_errors_total.inc()
-		print(f"❌ Ошибка логирования обучения: {e}")
+		metrics_logger.error(f"❌ Ошибка логирования обучения: {e}")
 
 def log_prediction(features: Dict[str, float], result: Dict[str, float], confidence: float, latency: Optional[float] = None):
 	"""
@@ -270,6 +268,7 @@ def log_prediction(features: Dict[str, float], result: Dict[str, float], confide
 		ml_prediction_confidence.observe(confidence)
 		if latency is not None:
 			ml_prediction_latency.observe(latency)
+		metrics_logger.info(f"✅ Логирование предсказания: confidence={confidence}, latency={latency}, result={result}")
 	except Exception as e:
 		ml_errors_total.inc()
-		print(f"❌ Ошибка логирования предсказания: {e}")
+		metrics_logger.error(f"❌ Ошибка логирования предсказания: {e}")
