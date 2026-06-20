@@ -1,3 +1,4 @@
+# app/tasks.py
 from app.celery_app import celery_app
 from app.db.session import get_session
 from app.services.exchange import update_ohlcv_for_all_pairs, get_ticker, get_order_book
@@ -7,6 +8,8 @@ import asyncio
 from app.services.news_loader import NewsLoader
 from app.config import settings
 from app.db import crud
+from scripts.fetch_data import update_csv, PAIRS
+import subprocess
 
 # --- OHLCV обновление ---
 @celery_app.task
@@ -87,3 +90,37 @@ def fetch_crypto_news_task(pair="BTC/USDT"):
 
 	asyncio.run(run())
 
+# --- Обновление CSV (fetch_data) ---
+@celery_app.task
+def update_csv_task(timeframe: str = settings.DEFAULT_TIMEFRAME,
+					days: int = settings.DEFAULT_DAYS,
+					out_dir: str = settings.DATA_DIR):
+	"""
+	Celery таск для обновления CSV файлов OHLCV по всем парам.
+	"""
+	try:
+		for pair in PAIRS:
+			update_csv(pair, timeframe=timeframe, days=days, out_dir=out_dir)
+		logger.info(f"✅ CSV обновлены для всех пар ({timeframe}, {days} дней)")
+	except Exception as e:
+		logger.error(f"❌ Ошибка обновления CSV: {e}")
+
+# --- Запуск Backtest ---
+@celery_app.task
+def run_backtest_task():
+	"""
+	Celery таск для запуска backtest.py.
+	Выполняется каждое воскресенье в 03:00.
+	"""
+	try:
+		result = subprocess.run(
+			["python", "backtest.py"],
+			capture_output=True,
+			text=True
+		)
+		if result.returncode == 0:
+			logger.info(f"✅ Backtest успешно завершён:\n{result.stdout}")
+		else:
+			logger.error(f"❌ Ошибка выполнения backtest.py:\n{result.stderr}")
+	except Exception as e:
+		logger.error(f"❌ Ошибка запуска backtest.py: {e}")

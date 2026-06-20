@@ -1,4 +1,6 @@
+# app/celery_app.py
 from celery import Celery
+from celery.schedules import crontab
 from app.config import settings
 
 celery_app = Celery(
@@ -21,7 +23,21 @@ celery_app.conf.beat_schedule = {
 		"schedule": 86400.0,  # раз в сутки
 		"args": ["1d"]
 	},
-}
+
+	# --- CSV обновление раз в неделю ---
+	"update-csv-weekly": {
+		"task": "app.tasks.update_csv_task",
+		"schedule": crontab(hour=2, minute=0, day_of_week="sun"),  # каждое воскресенье в 02:00
+		"args": [settings.DEFAULT_TIMEFRAME, settings.DEFAULT_DAYS, settings.DATA_DIR]
+	},
+
+	# --- Backtest запуск раз в неделю ---
+	"run-backtest-weekly": {
+		"task": "app.tasks.run_backtest_task",
+		"schedule": crontab(hour=3, minute=0, day_of_week="sun"),  # каждое воскресенье в 03:00
+		"args": []
+	},
+	}
 
 # --- Funding Rate ---
 for pair in PAIRS:

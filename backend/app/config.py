@@ -111,6 +111,11 @@ class Settings(BaseSettings):
 	# --- Protected Routes ---
 	PROTECTED_PATHS: list[str] = os.getenv("PROTECTED_PATHS", "/signals,/trades,/users,/indicators").split(",")
 
+	# --- Fetch Data Defaults ---
+	DEFAULT_TIMEFRAME: str = os.getenv("DEFAULT_TIMEFRAME", "1h")
+	DEFAULT_DAYS: int = int(os.getenv("DEFAULT_DAYS", 60))
+	DATA_DIR: str = os.getenv("DATA_DIR", "data")
+
 
 settings = Settings()
 
@@ -128,6 +133,7 @@ REDIS_CONFIG = {
 	"port": int(os.getenv("REDIS_PORT", 6379)),
 	"db": int(os.getenv("REDIS_DB", 0)),
 }
+
 
 
 
