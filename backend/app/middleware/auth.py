@@ -4,9 +4,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.utils.security import decode_jwt_token
 from app.utils.logger import logger
+from app.config import settings
 
 # --- Список защищённых маршрутов вынесен в конфиг ---
-PROTECTED_PATHS = ["/signals", "/trades", "/users", "/indicators"]
+PROTECTED_PATHS = getattr(settings, "PROTECTED_PATHS", ["/signals", "/trades", "/users", "/indicators"])
 
 class JWTMiddleware(BaseHTTPMiddleware):
 	"""
@@ -43,6 +44,9 @@ class JWTMiddleware(BaseHTTPMiddleware):
 				if payload.get("status") and payload.get("status") != "active":
 					logger.error(f"🚫 Blocked user {request.state.user_id} tried to access {request.url.path}")
 					raise HTTPException(status_code=403, detail="User is blocked")
+
+				# Логируем успешную авторизацию
+				logger.info(f"✅ User {request.state.user_id} ({request.state.role}) authorized for {request.url.path}")
 
 			except HTTPException as e:
 				# Логируем HTTP ошибки

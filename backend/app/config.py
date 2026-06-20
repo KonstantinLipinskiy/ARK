@@ -106,7 +106,10 @@ class Settings(BaseSettings):
 	RISK_LOG: str = os.getenv("RISK_LOG", os.path.join(LOG_DIR, "risk.log"))
 	BROKER_LOG: str = os.getenv("BROKER_LOG", os.path.join(LOG_DIR, "broker.log"))
 	METRICS_LOG: str = os.getenv("METRICS_LOG", os.path.join(LOG_DIR, "metrics.log"))
-	LOG_METRICS_LEVEL: str = os.getenv("LOG_METRICS_LEVEL", "INFO")  # ✅ новый флаг уровня логирования метрик
+	LOG_METRICS_LEVEL: str = os.getenv("LOG_METRICS_LEVEL", "INFO")  # ✅ уровень логирования метрик
+
+	# --- Protected Routes ---
+	PROTECTED_PATHS: list[str] = os.getenv("PROTECTED_PATHS", "/signals,/trades,/users,/indicators").split(",")
 
 
 settings = Settings()
@@ -125,6 +128,7 @@ REDIS_CONFIG = {
 	"port": int(os.getenv("REDIS_PORT", 6379)),
 	"db": int(os.getenv("REDIS_DB", 0)),
 }
+
 
 
 
