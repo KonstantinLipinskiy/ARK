@@ -4,6 +4,7 @@ import json
 import hashlib
 import uuid
 from typing import Any, Dict, Optional
+from openpyxl.utils import get_column_letter
 
 # --- Работа с датами и временем ---
 def format_timestamp(ts: float) -> str:
@@ -98,3 +99,25 @@ def hash_signal_key(signal: Dict[str, Any]) -> str:
 	"""
 	base = f"{signal.get('symbol', '')}_{signal.get('indicator', '')}_{signal.get('direction', '')}"
 	return short_hash(base, length=12)
+
+# --- Утилиты для экспорта ---
+def generate_export_filename(base_name: str = "backtest_summary.xlsx", use_timestamp: bool = True) -> str:
+	"""Генерация имени файла экспорта с опциональным timestamp."""
+	if use_timestamp:
+		timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+		return base_name.replace(".xlsx", f"_{timestamp}.xlsx")
+	return base_name
+
+def autofit_columns(worksheet) -> None:
+	"""Автоширина колонок для Excel листа."""
+	for col in worksheet.columns:
+		max_length = 0
+		col_letter = get_column_letter(col[0].column)
+		for cell in col:
+			try:
+				if cell.value:
+					max_length = max(max_length, len(str(cell.value)))
+			except Exception:
+				pass
+		adjusted_width = (max_length + 2)
+		worksheet.column_dimensions[col_letter].width = adjusted_width

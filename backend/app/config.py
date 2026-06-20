@@ -82,6 +82,7 @@ class Settings(BaseSettings):
 	# --- Export ---
 	DEBUG_EXPORT: bool = os.getenv("DEBUG_EXPORT", "False").lower() in ("true", "1", "yes")
 	EXPORT_FILENAME: str = os.getenv("EXPORT_FILENAME", "backtest_summary.xlsx")
+	EXPORT_TIMESTAMP: bool = os.getenv("EXPORT_TIMESTAMP", "True").lower() in ("true", "1", "yes")
 
 	# --- LLM Config ---
 	LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")  # openai / huggingface / llama / mistral
@@ -123,6 +124,8 @@ REDIS_CONFIG = {
 	"port": int(os.getenv("REDIS_PORT", 6379)),
 	"db": int(os.getenv("REDIS_DB", 0)),
 }
+
+
 
 
 
