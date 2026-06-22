@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, validator
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
+from datetime import datetime, timezone
 from typing import Optional
 from typing_extensions import Literal
 import enum
@@ -23,7 +23,8 @@ class Signal(BaseModel):
 	symbol: str = Field(..., description="Торговая пара, например BTC/USDT")
 	indicator: IndicatorEnum = Field(..., description="Название индикатора")
 	strength: float = Field(..., ge=0, le=1, description="Сила сигнала от 0 до 1")
-	timestamp: datetime = Field(default_factory=datetime.utcnow, description="Время генерации сигнала")
+	timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Время генерации сигнала")
+
 	direction: Literal["buy", "sell"] = Field(..., description="Направление: buy или sell")
 
 	user_id: Optional[int] = Field(None, description="ID пользователя, для которого сигнал")
@@ -39,21 +40,21 @@ class Signal(BaseModel):
 	volume: Optional[float] = Field(None, description="Trading volume")
 	bollinger: Optional[float] = Field(None, description="Bollinger Bands value")
 
-	@validator("timestamp")
+	@field_validator("timestamp")
 	def validate_timestamp(cls, v: datetime) -> datetime:
 		"""Проверка, что timestamp не в будущем."""
-		if v > datetime.utcnow():
+		if v > datetime.now(timezone.utc):
 			raise ValueError("timestamp не может быть в будущем")
 		return v
 
-	@validator("strength")
+	@field_validator("strength")
 	def validate_strength(cls, v: float) -> float:
 		"""Проверка диапазона strength."""
 		if not (0 <= v <= 1):
 			raise ValueError("strength должен быть в диапазоне [0,1]")
 		return v
 
-	@validator("confidence")
+	@field_validator("confidence")
 	def validate_confidence(cls, v: Optional[float]) -> Optional[float]:
 		"""Проверка диапазона confidence."""
 		if v is not None and not (0 <= v <= 1):

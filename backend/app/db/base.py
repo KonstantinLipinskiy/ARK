@@ -1,19 +1,21 @@
-import os
+# app/db/base.py
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from app.config import settings
 
+# --- Асинхронный движок ---
 engine = create_async_engine(
-	settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"), 
-	echo=os.getenv("SQL_ECHO", "false").lower() == "true",
-	pool_size=int(os.getenv("DB_POOL_SIZE", 10)),
-	max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 20)),
-	pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", 30)),
-	pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 1800)),
+	settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+	echo=settings.SQL_ECHO,
+	pool_size=settings.DB_POOL_SIZE,
+	max_overflow=settings.DB_MAX_OVERFLOW,
+	pool_timeout=settings.DB_POOL_TIMEOUT,
+	pool_recycle=settings.DB_POOL_RECYCLE,
 	pool_pre_ping=True,
 	future=True
 )
 
+# --- Фабрика асинхронных сессий ---
 SessionLocal = async_sessionmaker(
 	autocommit=False,
 	autoflush=False,
@@ -21,4 +23,5 @@ SessionLocal = async_sessionmaker(
 	expire_on_commit=False
 )
 
+# --- Декларативная база для ORM моделей ---
 Base = declarative_base()

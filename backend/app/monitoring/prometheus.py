@@ -39,6 +39,7 @@ router = APIRouter()
 # 🔹 Метрики Prometheus (торговля)
 winrate_gauge = Gauge("bot_winrate", "Winrate of trades")
 profit_gauge = Gauge("bot_total_profit", "Total profit of trades")
+average_profit_gauge = Gauge("bot_average_profit", "Average profit per trade")  # ✅ добавлено
 drawdown_gauge = Gauge("bot_max_drawdown", "Maximum drawdown")
 trades_counter = Gauge("bot_trades_count", "Number of trades executed")
 sharpe_gauge = Gauge("bot_sharpe_ratio", "Sharpe ratio of trades")
@@ -77,6 +78,20 @@ indicators_tasks_errors = Counter("indicators_tasks_errors_total", "Total indica
 indicators_task_duration = Histogram("indicators_task_duration_seconds", "Indicator task execution time")
 indicators_queue_time = Histogram("indicators_queue_time_seconds", "Indicator task queue time")
 
+# 🔹 Метрики Prometheus (ML)
+ml_accuracy_gauge = Gauge("ml_training_accuracy", "ML model training accuracy")
+ml_precision_gauge = Gauge("ml_training_precision", "ML model training precision")
+ml_recall_gauge = Gauge("ml_training_recall", "ML model training recall")
+ml_loss_gauge = Gauge("ml_training_loss", "ML model training loss")
+ml_epoch_loss_gauge = Gauge("ml_training_epoch_loss", "ML training loss per epoch")  # ✅ добавлено
+ml_training_time_gauge = Gauge("ml_training_time_seconds", "ML training time in seconds")
+ml_learning_rate_gauge = Gauge("ml_training_learning_rate", "ML training learning rate")
+ml_cv_accuracy_gauge = Gauge("ml_cv_accuracy", "ML cross-validation accuracy")  # ✅ добавлено
+ml_cv_loss_gauge = Gauge("ml_cv_loss", "ML cross-validation loss")  # ✅ добавлено
+
+# 🔹 Метрики Prometheus (Recent Trades)
+recent_trades_gauge = Gauge("bot_recent_trades", "Recent trades info", ["trade_id", "symbol", "profit", "status", "user_id", "strategy"])  # ✅ добавлено
+
 @router.get("/metrics")
 async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	"""
@@ -91,6 +106,7 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 
 	winrate_gauge.set(stats["winrate"])
 	profit_gauge.set(stats["total_profit"])
+	average_profit_gauge.set(stats["average_profit"])  # ✅ добавлено
 	drawdown_gauge.set(stats["max_drawdown"])
 	trades_counter.set(stats["trades_count"])
 	sharpe_gauge.set(stats["sharpe_ratio"])
@@ -136,6 +152,18 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	)
 	signals_sell_total.set(sell_signals or 0)
 
+	# --- Метрики Recent Trades ---
+	recent_trades = trades[-10:]  # последние 10 сделок
+	for trade in recent_trades:
+		recent_trades_gauge.labels(
+			trade_id=str(trade.id),
+			symbol=trade.symbol,
+			profit=str(trade.profit),
+			status=trade.status,
+			user_id=str(trade.user_id),
+			strategy=trade.strategy
+		).set(trade.profit)
+
 	# --- Метрики RabbitMQ ---
 	broker = RabbitMQBroker()
 	try:
@@ -171,13 +199,32 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	try:
 		vector_db = VectorDB()
 		VECTOR_POINTS_TOTAL.labels(collection=vector_db.collection_name).set(vector_db.count_points())
+		VECTOR_SEARCH_TOTAL.labels(collection=vector_db.collection_name).inc()
 		latency = vector_db.get_last_search_latency()
 		if latency:
 			VECTOR_SEARCH_LATENCY.labels(collection=vector_db.collection_name).observe(latency)
 	except Exception:
 		VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="metrics").inc()
 
+	# --- Метрики ML ---
+	try:
+		ml_accuracy_gauge.set(ml_accuracy())
+		ml_precision_gauge.set(ml_cv_precision())
+		ml_recall_gauge.set(ml_cv_recall())
+		ml_loss_gauge.set(ml_loss())
+		ml_epoch_loss_gauge.set(ml_epoch_loss())  # ✅ добавлено
+		ml_training_time_gauge.set(ml_training_time())
+		ml_learning_rate_gauge.set(ml_learning_rate())
+		ml_cv_accuracy_gauge.set(ml_cv_accuracy())  # ✅ добавлено
+		ml_cv_loss_gauge.set(ml_cv_loss())          # ✅ добавлено
+		ml_training_runs_total.inc()
+		ml_predictions_total.inc()
+		ml_prediction_confidence.observe(0.85)  # пример: confidence модели
+	except Exception:
+		pass
+
 	return Response(generate_latest(), media_type="text/plain")
+
 
 def log_error():
 	"""

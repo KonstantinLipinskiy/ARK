@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing_extensions import Literal
 
 
@@ -10,14 +10,14 @@ class User(BaseModel):
 	email: EmailStr = Field(..., description="Email пользователя")
 	role: Literal["admin", "trader"] = Field(default="trader", description="Роль пользователя")
 	status: Literal["active", "blocked"] = Field(default="active", description="Статус пользователя")
-	created_at: datetime = Field(default_factory=datetime.utcnow, description="Дата регистрации")
+	created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Дата регистрации")
 
 	password_hash: str = Field(..., description="Хэш пароля для аутентификации")
 	salt: str = Field(..., description="Соль для хэширования пароля")
 	telegram_id: Optional[str] = Field(None, description="Telegram ID для интеграции с ботом")
 	is_admin: bool = Field(default=False, description="Флаг администратора")
 	last_login: Optional[datetime] = Field(None, description="Дата последнего входа")
-	updated_at: datetime = Field(default_factory=datetime.utcnow, description="Дата последнего обновления")
+	updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Дата последнего обновления")
 	settings: Optional[Dict] = Field(
 		default_factory=dict,
 		description="Настройки пользователя (например, risk_profile и notifications_enabled)"
@@ -26,21 +26,21 @@ class User(BaseModel):
 	class Config:
 		json_schema_extra = {
 			"example": {
-					"id": 1,
-					"username": "konstantin",
-					"email": "test@example.com",
-					"role": "admin",
-					"status": "active",
-					"password_hash": "hashed_password_here",
-					"salt": "random_salt_here",
-					"telegram_id": "123456789",
-					"is_admin": True,
-					"last_login": "2026-05-03T12:00:00",
-					"updated_at": "2026-05-03T12:30:00",
-					"settings": {
-						"risk_profile": "conservative",
-						"notifications_enabled": True
-					}
+				"id": 1,
+				"username": "konstantin",
+				"email": "test@example.com",
+				"role": "admin",
+				"status": "active",
+				"password_hash": "hashed_password_here",
+				"salt": "random_salt_here",
+				"telegram_id": "123456789",
+				"is_admin": True,
+				"last_login": "2026-05-03T12:00:00",
+				"updated_at": "2026-05-03T12:30:00",
+				"settings": {
+					"risk_profile": "conservative",
+					"notifications_enabled": True
+				}
 			}
 		}
 
@@ -60,16 +60,16 @@ class UserCreate(BaseModel):
 	class Config:
 		json_schema_extra = {
 			"example": {
-					"username": "new_user",
-					"email": "new@example.com",
-					"password": "secure_password",
-					"role": "trader",
-					"telegram_id": "987654321",
-					"is_admin": False,
-					"settings": {
-						"risk_profile": "moderate",
-						"notifications_enabled": False
-					}
+				"username": "new_user",
+				"email": "new@example.com",
+				"password": "secure_password",
+				"role": "trader",
+				"telegram_id": "987654321",
+				"is_admin": False,
+				"settings": {
+					"risk_profile": "moderate",
+					"notifications_enabled": False
+				}
 			}
 		}
 
@@ -81,8 +81,8 @@ class UserLogin(BaseModel):
 	class Config:
 		json_schema_extra = {
 			"example": {
-					"email": "test@example.com",
-					"password": "secure_password"
+				"email": "test@example.com",
+				"password": "secure_password"
 			}
 		}
 
@@ -104,19 +104,19 @@ class UserOut(BaseModel):
 		orm_mode = True
 		json_schema_extra = {
 			"example": {
-					"id": 1,
-					"username": "konstantin",
-					"email": "test@example.com",
-					"role": "admin",
-					"status": "active",
-					"created_at": "2026-05-07T12:00:00",
-					"last_login": "2026-05-07T12:30:00",
-					"updated_at": "2026-05-07T12:45:00",
-					"telegram_id": "123456789",
-					"is_admin": True,
-					"settings": {
-						"risk_profile": "aggressive",
-						"notifications_enabled": True
-					}
+				"id": 1,
+				"username": "konstantin",
+				"email": "test@example.com",
+				"role": "admin",
+				"status": "active",
+				"created_at": "2026-05-07T12:00:00",
+				"last_login": "2026-05-07T12:30:00",
+				"updated_at": "2026-05-07T12:45:00",
+				"telegram_id": "123456789",
+				"is_admin": True,
+				"settings": {
+					"risk_profile": "aggressive",
+					"notifications_enabled": True
+				}
 			}
 		}

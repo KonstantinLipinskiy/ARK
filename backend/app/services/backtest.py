@@ -485,6 +485,3 @@ if __name__ == "__main__":
 		from app.utils.export import export_to_excel
 		export_to_excel(all_metrics, all_results)
 		print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
-
-
-

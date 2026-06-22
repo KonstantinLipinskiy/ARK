@@ -10,7 +10,7 @@ from app.services.indicator_factory import IndicatorFactory
 from app.utils.logger import (
 	logger,
 	log_order_error,
-)  # ✅ используем централизованную функцию
+)
 from app.utils.security import get_current_user
 from app.monitoring.prometheus import (
 	indicators_tasks_total,

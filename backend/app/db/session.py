@@ -3,14 +3,15 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
+from typing import AsyncGenerator
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 # 🔹 Определяем строки подключения
-DATABASE_URL = settings.DATABASE_URL
-DATABASE_URL_MAINNET = settings.DATABASE_URL  # основной URL
-DATABASE_URL_TESTNET = DATABASE_URL.replace("mainnet", "testnet") if "mainnet" in DATABASE_URL else DATABASE_URL
+DATABASE_URL_MAINNET = settings.DATABASE_URL_MAINNET or settings.DATABASE_URL
+DATABASE_URL_TESTNET = settings.DATABASE_URL_TESTNET or settings.DATABASE_URL
 
 # 🔹 Создание асинхронных движков
 engine_mainnet = create_async_engine(
@@ -45,7 +46,7 @@ SessionLocal_TESTNET = sessionmaker(
 )
 
 # 🔹 Dependency для FastAPI
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
 	"""Выбор движка в зависимости от окружения"""
 	if settings.USE_TESTNET or settings.ENV == "testnet":
 		session_factory = SessionLocal_TESTNET

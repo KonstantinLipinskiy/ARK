@@ -1,4 +1,4 @@
-#app/services/risk.py
+# app/services/risk.py
 import asyncio
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,25 @@ class RiskService:
 			logger.info("♻️ RiskService configs refreshed")
 		except Exception as e:
 			logger.error(f"❌ Failed to refresh configs: {e}")
+
+	# --- Новый метод для Telegram ---
+	async def get_limits(self, user_id: int | None = None) -> dict:
+		"""
+		Возвращает ключевые лимиты риск‑менеджмента для Telegram команд.
+		"""
+		risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
+
+		return {
+			"stop_loss_pct": risk_config.get("stop_loss_pct", "-"),
+			"default_trade_loss_pct": risk_config.get("default_trade_loss_pct", "-"),
+			"max_trades": risk_config.get("max_open_trades", "-"),
+			"max_leverage": risk_config.get("max_leverage", "-"),
+			"max_daily_loss": risk_config.get("max_daily_loss", "-"),
+			"risk_reward_ratio": risk_config.get("risk_reward_ratio", "-"),
+			"cooldown_between_trades": risk_config.get("cooldown_between_trades", "-"),
+			"dynamic_allocation": risk_config.get("dynamic_allocation", False),
+			"strength_multiplier": risk_config.get("strength_multiplier", "-"),
+		}
 
 	# --- FUNDING RATE ---
 	async def save_funding_rate(self, symbol: str):
@@ -507,4 +526,3 @@ class RiskService:
 				"error": f"Risk validation error: {e}"
 			})
 			return False
-

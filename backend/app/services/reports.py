@@ -1,7 +1,7 @@
 # app/services/reports.py
 import time
 from typing import List, Dict, Optional
-from langchain_community.chains import RetrievalQA   # новый вариант
+from langchain_community.chains import RetrievalQA
 from langchain_openai import OpenAI
 from app.db.vector import VectorDB
 from app.utils.metrics import calculate_metrics

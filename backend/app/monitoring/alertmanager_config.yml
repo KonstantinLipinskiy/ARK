@@ -21,8 +21,8 @@ receivers:
   # --- Telegram для критических алертов ---
   - name: "telegram_critical"
     telegram_configs:
-      - bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
-        chat_id: "YOUR_TELEGRAM_CHAT_ID"
+      - bot_token: "8664086301:AAGpmpsXEytmZPnF3AcLmVM_F2OFXgAItYQ"   # из .env TELEGRAM_TOKEN
+        chat_id: "685072393"                                          # из .env TELEGRAM_CHAT_ID
         parse_mode: "Markdown"
         message: |
           🚨 *Critical Alert:* {{ .CommonLabels.alertname }}
@@ -36,7 +36,7 @@ receivers:
   # --- Slack для warning ---
   - name: "slack_warnings"
     slack_configs:
-      - api_url: "YOUR_SLACK_WEBHOOK_URL"
+      - api_url: "https://hooks.slack.com/services/YOUR_REAL_WEBHOOK"   # нужно заменить на реальный Slack webhook
         channel: "#alerts-warning"
         send_resolved: true
         text: |
@@ -51,11 +51,11 @@ receivers:
   # --- Email для info ---
   - name: "email_info"
     email_configs:
-      - to: "alerts-info@example.com"
-        from: "alertmanager@example.com"
-        smarthost: "smtp.example.com:587"
-        auth_username: "alertmanager@example.com"
-        auth_password: "YOUR_SMTP_PASSWORD"
+      - to: "alerts-info@example.com"                # получатель
+        from: "alertmanager@example.com"             # отправитель
+        smarthost: "smtp.example.com:587"            # SMTP сервер
+        auth_username: "alertmanager@example.com"    # логин
+        auth_password: "YOUR_SMTP_PASSWORD"          # пароль SMTP
         send_resolved: true
         headers:
           subject: "[INFO Alert] {{ .CommonLabels.alertname }}"
@@ -71,8 +71,8 @@ receivers:
   # --- Default receiver (на всякий случай) ---
   - name: "default"
     telegram_configs:
-      - bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
-        chat_id: "YOUR_TELEGRAM_CHAT_ID"
+      - bot_token: "8664086301:AAGpmpsXEytmZPnF3AcLmVM_F2OFXgAItYQ"   # тот же токен
+        chat_id: "685072393"                                          # тот же чат
         parse_mode: "Markdown"
         message: |
           🔔 *Default Alert:* {{ .CommonLabels.alertname }}

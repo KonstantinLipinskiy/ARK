@@ -632,7 +632,6 @@ class MLService:
 		else:
 			raise TypeError("Неизвестный тип модели")
 
-	
 
 	def load_model(self, path: str, model_type: str):
 		if model_type == "sklearn":

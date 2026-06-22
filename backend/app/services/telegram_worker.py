@@ -10,15 +10,13 @@ from app.utils.logger import logger
 from app.broker.rabbitmq import RabbitMQBroker
 from app.db.session import get_session
 from app.db.schemas import UserORM
-from app.services.reports import ReportsService   # 🔹 добавлено
+from app.services.reports import ReportsService
+from app.config import settings
 
-# Загружаем токен из .env
-load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-bot = Bot(token=TELEGRAM_TOKEN)
+bot = Bot(token=settings.TELEGRAM_TOKEN)
 broker = RabbitMQBroker()
-reports_service = ReportsService()   # 🔹 используем ReportsService
+reports_service = ReportsService()
 
 async def get_user_by_id(user_id: int) -> UserORM | None:
 	"""Получить пользователя по его ID из БД."""

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from typing_extensions import Literal
 
@@ -9,7 +9,7 @@ class Trade(BaseModel):
 	side: Literal["buy", "sell"] = Field(..., description="Направление сделки: buy или sell")
 	amount: float = Field(..., gt=0, description="Количество актива")
 	price: float = Field(..., gt=0, description="Цена исполнения")
-	timestamp: datetime = Field(default_factory=datetime.utcnow, description="Время сделки")
+	timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Время сделки")
 	status: Literal["open", "closed", "cancelled"] = Field(default="open", description="Статус сделки")
 	entry_price: Optional[float] = Field(None, gt=0, description="Цена входа")
 	exit_price: Optional[float] = Field(None, gt=0, description="Цена выхода")

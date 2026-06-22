@@ -1,19 +1,17 @@
 # app/services/telegram.py
-import os
-import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.utils.logger import logger
-from app.db.schemas import TradeORM, SignalORM, UserORM, RiskLog
+from app.db.schemas import TradeORM, UserORM
 from app.broker.rabbitmq import RabbitMQBroker
 from app.utils.metrics import calculate_metrics
 from app.config import Settings
 from app.db.session import get_session
 from app.services.exchange import load_strategies
 from app.services.risk import RiskService
-from app.services.reports import ReportsService   # 🔹 добавлено
+from app.services.reports import ReportsService
 
 settings = Settings()
 bot = Bot(token=settings.TELEGRAM_TOKEN)
@@ -22,7 +20,7 @@ dp = Dispatcher()
 class TelegramService:
 	def __init__(self, bot: Bot):
 		self.bot = bot
-		self.reports_service = ReportsService()   # 🔹 используем ReportsService
+		self.reports_service = ReportsService()
 
 	async def send_message_to_user(self, user: UserORM, text: str):
 		"""Отправка сообщения конкретному пользователю по его telegram_id."""

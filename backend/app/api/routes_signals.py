@@ -15,9 +15,9 @@ from app.utils.logger import (
 	logger,
 	log_order_error,
 	log_signal_rejected,
-)  # ✅ используем централизованные функции
+)
 from app.config import settings
-from app.utils.security import get_current_user   # ✅ централизованная авторизация
+from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 

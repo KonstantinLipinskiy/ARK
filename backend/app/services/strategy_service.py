@@ -5,7 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db.schemas import StrategyORM
 from app.utils.logger import logger
 from app.services.telegram import telegram_service
-from app.services.exchange import load_strategies, get_ticker, get_order_book   # 🔹 новые методы
+from app.services.exchange import load_strategies, get_ticker, get_order_book
 
 # --- CRUD операции ---
 async def add_strategy(db: AsyncSession, strategy_data: dict):

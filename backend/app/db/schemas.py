@@ -132,9 +132,9 @@ class RiskLog(Base):
 	symbol = Column(String(20), nullable=True)
 	position_size = Column(Float, nullable=True)
 	deposit = Column(Float, nullable=True)
-	sentiment = Column(Float, nullable=True)       # 🔹 новое поле
-	profit_loss = Column(Float, nullable=True)     # 🔹 новое поле
-	expected_pnl = Column(Float, nullable=True)    # 🔹 новое поле
+	sentiment = Column(Float, nullable=True)
+	profit_loss = Column(Float, nullable=True)
+	expected_pnl = Column(Float, nullable=True)
 	timestamp = Column(DateTime, server_default=func.now())
 
 

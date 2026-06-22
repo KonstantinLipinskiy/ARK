@@ -8,11 +8,11 @@ from datetime import datetime
 from app.models.news import NewsCreate, NewsRead
 from app.db.session import get_db
 from app.db import crud
-from app.utils.security import get_current_user   # ✅ централизованная авторизация
+from app.utils.security import get_current_user
 from app.utils.logger import (
 	logger,
 	log_order_error,
-)  # ✅ используем централизованную функцию
+)
 
 router = APIRouter(prefix="/news", tags=["news"])
 

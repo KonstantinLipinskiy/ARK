@@ -6,11 +6,11 @@ from typing import Optional
 
 from app.db.session import get_session
 from app.db import crud
-from app.utils.security import get_current_user   # ✅ централизованная авторизация
+from app.utils.security import get_current_user
 from app.utils.logger import (
 	logger,
 	log_order_error,
-)  # ✅ используем централизованную функцию
+)
 
 router = APIRouter(prefix="/api", tags=["Backtest"])
 
