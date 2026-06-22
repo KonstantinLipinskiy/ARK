@@ -9,8 +9,6 @@ celery_app = Celery(
 	backend=settings.CELERY_RESULT_BACKEND
 )
 
-PAIRS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "ADA/USDT"]
-
 celery_app.conf.beat_schedule = {
 	# --- OHLCV ---
 	"update-ohlcv-hourly": {
@@ -37,45 +35,42 @@ celery_app.conf.beat_schedule = {
 		"schedule": crontab(hour=3, minute=0, day_of_week="sun"),  # каждое воскресенье в 03:00
 		"args": []
 	},
-	}
+}
 
 # --- Funding Rate ---
-for pair in PAIRS:
-	symbol = pair
+for pair in settings.PAIRS:
 	name = pair.split("/")[0].lower()
 	celery_app.conf.beat_schedule[f"update-funding-rate-{name}"] = {
 		"task": "app.tasks.update_funding_rate_task",
 		"schedule": 28800.0,  # каждые 8 часов
-		"args": [symbol]
+		"args": [pair]
 	}
 
 # --- Мониторинг тикеров ---
-for pair in PAIRS:
-	symbol = pair
+for pair in settings.PAIRS:
 	name = pair.split("/")[0].lower()
 	celery_app.conf.beat_schedule[f"monitor-ticker-{name}"] = {
 		"task": "app.tasks.monitor_ticker_task",
 		"schedule": 600.0,  # каждые 10 минут
-		"args": [symbol]
+		"args": [pair]
 	}
 
 # --- Мониторинг стакана ---
-for pair in PAIRS:
-	symbol = pair
+for pair in settings.PAIRS:
 	name = pair.split("/")[0].lower()
 	celery_app.conf.beat_schedule[f"monitor-order-book-{name}"] = {
 		"task": "app.tasks.monitor_order_book_task",
 		"schedule": 900.0,  # каждые 15 минут
-		"args": [symbol]
+		"args": [pair]
 	}
 
 # --- Новости ---
-for pair in PAIRS:
-	symbol = pair.split("/")[0].lower()
-	celery_app.conf.beat_schedule[f"fetch-news-{symbol}-hourly"] = {
+for pair in settings.PAIRS:
+	name = pair.split("/")[0].lower()
+	celery_app.conf.beat_schedule[f"fetch-news-{name}-hourly"] = {
 		"task": "app.tasks.fetch_crypto_news_task",
 		"schedule": 3600.0,  # каждый час
-		"args": [symbol]
+		"args": [pair]  # теперь передаём полную пару, например "BTC/USDT"
 	}
 
 celery_app.conf.timezone = "UTC"

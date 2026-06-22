@@ -7,9 +7,6 @@ import argparse
 from app.utils.logger import logger
 from app.config import settings
 
-# список пар для загрузки
-PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "ADA/USDT"]
-
 def update_csv(symbol: str, timeframe: str, days: int, out_dir: str):
 	"""
 	Загружает OHLCV данные для пары и сохраняет в CSV.
@@ -48,5 +45,5 @@ if __name__ == "__main__":
 
 	os.makedirs(args.out_dir, exist_ok=True)
 
-	for pair in PAIRS:
+	for pair in settings.PAIRS:
 		update_csv(pair, timeframe=args.timeframe, days=args.days, out_dir=args.out_dir)

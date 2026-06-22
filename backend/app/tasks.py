@@ -8,8 +8,17 @@ import asyncio
 from app.services.news_loader import NewsLoader
 from app.config import settings
 from app.db import crud
-from scripts.fetch_data import update_csv, PAIRS
+from scripts.fetch_data import update_csv
 import subprocess
+
+# --- Вспомогательная функция для запуска async-кода ---
+def run_async(coro):
+	try:
+		loop = asyncio.get_event_loop()
+	except RuntimeError:
+		loop = asyncio.new_event_loop()
+		asyncio.set_event_loop(loop)
+	return loop.run_until_complete(coro)
 
 # --- OHLCV обновление ---
 @celery_app.task
@@ -18,7 +27,7 @@ def update_ohlcv_task(timeframe="1h"):
 		async with get_session() as session:
 			await update_ohlcv_for_all_pairs(session, timeframe=timeframe, limit=500)
 			logger.info(f"✅ OHLCV обновлены для всех пар ({timeframe})")
-	asyncio.run(run())
+	run_async(run())
 
 # --- Funding Rate обновление ---
 @celery_app.task
@@ -27,7 +36,7 @@ def update_funding_rate_task(symbol: str):
 		async with get_session() as session:
 			risk_service = RiskService(session)
 			await risk_service.save_funding_rate(symbol)
-	asyncio.run(run())
+	run_async(run())
 
 # --- Мониторинг тикеров ---
 @celery_app.task
@@ -38,7 +47,7 @@ def monitor_ticker_task(symbol: str):
 			logger.info(f"📊 {symbol} Ticker: Last={ticker['last']} Bid={ticker['bid']} Ask={ticker['ask']} Spread={ticker['spread']}")
 		else:
 			logger.error(f"❌ Ошибка получения тикера для {symbol}: {ticker['error']}")
-	asyncio.run(run())
+	run_async(run())
 
 # --- Мониторинг стакана ---
 @celery_app.task
@@ -52,7 +61,7 @@ def monitor_order_book_task(symbol: str):
 			logger.info(f"📊 {symbol} OrderBook: Bids={total_bids:.2f} Asks={total_asks:.2f} Imbalance={imbalance:.2f}")
 		else:
 			logger.error(f"❌ Ошибка получения стакана для {symbol}: {order_book['error']}")
-	asyncio.run(run())
+	run_async(run())
 
 # --- Новости ---
 @celery_app.task
@@ -88,7 +97,7 @@ def fetch_crypto_news_task(pair="BTC/USDT"):
 		else:
 			logger.warning(f"⚠️ Новости для {pair} не получены")
 
-	asyncio.run(run())
+	run_async(run())
 
 # --- Обновление CSV (fetch_data) ---
 @celery_app.task
@@ -99,7 +108,7 @@ def update_csv_task(timeframe: str = settings.DEFAULT_TIMEFRAME,
 	Celery таск для обновления CSV файлов OHLCV по всем парам.
 	"""
 	try:
-		for pair in PAIRS:
+		for pair in settings.PAIRS:
 			update_csv(pair, timeframe=timeframe, days=days, out_dir=out_dir)
 		logger.info(f"✅ CSV обновлены для всех пар ({timeframe}, {days} дней)")
 	except Exception as e:
