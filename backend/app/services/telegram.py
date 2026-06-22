@@ -1,4 +1,3 @@
-# app/services/telegram.py
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from sqlalchemy import select
@@ -21,6 +20,18 @@ class TelegramService:
 	def __init__(self, bot: Bot):
 		self.bot = bot
 		self.reports_service = ReportsService()
+
+	async def send_message(self, text: str, telegram_id: str | None = None):
+		"""Универсальная отправка сообщения (по умолчанию админу)."""
+		target_id = telegram_id or getattr(settings, "ADMIN_TELEGRAM_ID", None)
+		if not target_id:
+			logger.error("❌ ADMIN_TELEGRAM_ID не задан")
+			return
+		try:
+			await self.bot.send_message(chat_id=target_id, text=text)
+			logger.info(f"📤 Сообщение отправлено в чат {target_id}")
+		except Exception as e:
+			logger.error(f"Ошибка отправки сообщения: {e}")
 
 	async def send_message_to_user(self, user: UserORM, text: str):
 		"""Отправка сообщения конкретному пользователю по его telegram_id."""
@@ -168,34 +179,18 @@ async def start_command(message: types.Message):
 async def status_command(message: types.Message):
 	if not await is_authorized(message):
 		return
-	async with get_session() as session:
-		result = await session.execute(select(TradeORM).where(TradeORM.status == "open"))
-		trades = result.scalars().all()
-		if trades:
-			msg = "\n".join([
-				f"{t.symbol} {t.side} {t.amount} @ {t.price} (Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
-				for t in trades
-			])
-			await message.answer(f"📌 Активные позиции:\n{msg}")
-		else:
-			await message.answer("Пока нет открытых позиций.")
-
-@dp.message(Command("trades"))
-async def trades_command(message: types.Message):
-	if not await is_authorized(message):
-		return
-	async with get_session() as session:
-		result = await session.execute(select(TradeORM).order_by(TradeORM.timestamp.desc()).limit(10))
-		trades = result.scalars().all()
-		if trades:
-			msg = "\n".join([
-				f"{t.symbol} {t.side} {t.amount} @ {t.price} "
-				f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
-				for t in trades
-			])
-			await message.answer(f"📊 Последние сделки:\n{msg}")
-		else:
-			await message.answer("История сделок пуста.")
+		async with get_session() as session:
+			result = await session.execute(select(TradeORM).order_by(TradeORM.timestamp.desc()).limit(10))
+			trades = result.scalars().all()
+			if trades:
+				msg = "\n".join([
+					f"{t.symbol} {t.side} {t.amount} @ {t.price} "
+					f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
+					for t in trades
+				])
+				await message.answer(f"📊 Последние сделки:\n{msg}")
+			else:
+				await message.answer("История сделок пуста.")
 
 @dp.message(Command("report"))
 async def report_command(message: types.Message):

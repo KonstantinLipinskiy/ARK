@@ -1,7 +1,6 @@
 # app/main.py
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import time
@@ -15,7 +14,7 @@ from app.utils.logger import logger
 from prometheus_client import Counter, Histogram
 from sqlalchemy import event
 from app.db.session import engine_mainnet, engine_testnet, async_session
-from app.services.risk import RiskService   # ✅ импорт RiskService
+from app.services.risk import RiskService
 
 REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests")
 REQUEST_LATENCY = Histogram("http_request_duration_seconds", "Request latency in seconds")
