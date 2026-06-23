@@ -1,5 +1,5 @@
 # app/monitoring/prometheus.py
-from fastapi import APIRouter, Response, Depends
+from fastapi import APIRouter, Response, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -24,8 +24,6 @@ from app.utils.metrics import (
 	ml_prediction_confidence
 )
 
-from app.broker.rabbitmq import RabbitMQBroker
-from app.cache.redis import RedisCache
 from app.db.vector import (
 	VECTOR_POINTS_TOTAL,
 	VECTOR_SEARCH_TOTAL,
@@ -39,7 +37,7 @@ router = APIRouter()
 # 🔹 Метрики Prometheus (торговля)
 winrate_gauge = Gauge("bot_winrate", "Winrate of trades")
 profit_gauge = Gauge("bot_total_profit", "Total profit of trades")
-average_profit_gauge = Gauge("bot_average_profit", "Average profit per trade")  # ✅ добавлено
+average_profit_gauge = Gauge("bot_average_profit", "Average profit per trade")
 drawdown_gauge = Gauge("bot_max_drawdown", "Maximum drawdown")
 trades_counter = Gauge("bot_trades_count", "Number of trades executed")
 sharpe_gauge = Gauge("bot_sharpe_ratio", "Sharpe ratio of trades")
@@ -62,13 +60,13 @@ signals_sell_total = Gauge("signals_sell_total", "Total number of SELL signals")
 # 🔹 Метрики Prometheus (RabbitMQ)
 rabbitmq_messages_published = Gauge("rabbitmq_messages_published_total", "Total messages published to RabbitMQ")
 rabbitmq_messages_consumed = Gauge("rabbitmq_messages_consumed_total", "Total messages consumed from RabbitMQ")
-rabbitmq_errors_total = Gauge("rabbitmq_errors_total", "Total RabbitMQ errors (current value from broker)")
+rabbitmq_errors_total = Counter("rabbitmq_errors_total", "Total RabbitMQ errors")
 rabbitmq_processing_time_avg = Histogram("rabbitmq_processing_time_avg_seconds", "Average message processing time in RabbitMQ")
 rabbitmq_processing_time_max = Histogram("rabbitmq_processing_time_max_seconds", "Maximum message processing time in RabbitMQ")
 
 # 🔹 Метрики Prometheus (Redis)
 redis_keys_total = Gauge("redis_keys_total", "Total number of keys in Redis")
-redis_errors_total = Gauge("redis_errors_total", "Total Redis errors (current value from cache)")
+redis_errors_total = Counter("redis_errors_total", "Total Redis errors")
 redis_latency_seconds = Histogram("redis_latency_seconds", "Redis latency in seconds")
 redis_latency_summary = Summary("redis_latency_summary_seconds", "Redis latency summary in seconds")
 
@@ -83,17 +81,17 @@ ml_accuracy_gauge = Gauge("ml_training_accuracy", "ML model training accuracy")
 ml_precision_gauge = Gauge("ml_training_precision", "ML model training precision")
 ml_recall_gauge = Gauge("ml_training_recall", "ML model training recall")
 ml_loss_gauge = Gauge("ml_training_loss", "ML model training loss")
-ml_epoch_loss_gauge = Gauge("ml_training_epoch_loss", "ML training loss per epoch")  # ✅ добавлено
+ml_epoch_loss_gauge = Gauge("ml_training_epoch_loss", "ML training loss per epoch")
 ml_training_time_gauge = Gauge("ml_training_time_seconds", "ML training time in seconds")
 ml_learning_rate_gauge = Gauge("ml_training_learning_rate", "ML training learning rate")
-ml_cv_accuracy_gauge = Gauge("ml_cv_accuracy", "ML cross-validation accuracy")  # ✅ добавлено
-ml_cv_loss_gauge = Gauge("ml_cv_loss", "ML cross-validation loss")  # ✅ добавлено
+ml_cv_accuracy_gauge = Gauge("ml_cv_accuracy", "ML cross-validation accuracy")
+ml_cv_loss_gauge = Gauge("ml_cv_loss", "ML cross-validation loss")
 
 # 🔹 Метрики Prometheus (Recent Trades)
-recent_trades_gauge = Gauge("bot_recent_trades", "Recent trades info", ["trade_id", "symbol", "profit", "status", "user_id", "strategy"])  # ✅ добавлено
+recent_trades_gauge = Gauge("bot_recent_trades", "Recent trades info", ["trade_id", "symbol", "profit_loss", "status", "user_id"])
 
 @router.get("/metrics")
-async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
+async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
 	"""
 	Эндпоинт /metrics:
 	Собирает метрики торговли, сделок, сигналов, ML обучения,
@@ -106,7 +104,7 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 
 	winrate_gauge.set(stats["winrate"])
 	profit_gauge.set(stats["total_profit"])
-	average_profit_gauge.set(stats["average_profit"])  # ✅ добавлено
+	average_profit_gauge.set(stats["average_profit"])
 	drawdown_gauge.set(stats["max_drawdown"])
 	trades_counter.set(stats["trades_count"])
 	sharpe_gauge.set(stats["sharpe_ratio"])
@@ -143,12 +141,12 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 	signals_filtered_total.set(weak_signals or 0)
 
 	buy_signals = await db.scalar(
-		select(func.count()).select_from(SignalORM).filter(SignalORM.type == "buy")
+		select(func.count()).select_from(SignalORM).filter(SignalORM.direction == "buy")
 	)
 	signals_buy_total.set(buy_signals or 0)
 
 	sell_signals = await db.scalar(
-		select(func.count()).select_from(SignalORM).filter(SignalORM.type == "sell")
+		select(func.count()).select_from(SignalORM).filter(SignalORM.direction == "sell")
 	)
 	signals_sell_total.set(sell_signals or 0)
 
@@ -158,37 +156,37 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		recent_trades_gauge.labels(
 			trade_id=str(trade.id),
 			symbol=trade.symbol,
-			profit=str(trade.profit),
-			status=trade.status,
+			profit_loss=str(trade.profit_loss),
+			status=trade.status.value if isinstance(trade.status, TradeStatus) else str(trade.status),
 			user_id=str(trade.user_id),
-			strategy=trade.strategy
-		).set(trade.profit)
+		).set(trade.profit_loss or 0)
 
 	# --- Метрики RabbitMQ ---
-	broker = RabbitMQBroker()
+	broker = request.app.state.broker
 	try:
 		metrics = broker.get_metrics()
 		rabbitmq_messages_published.set(metrics["messages_published"])
 		rabbitmq_messages_consumed.set(metrics["messages_consumed"])
-		rabbitmq_errors_total.set(metrics["errors_total"])
+		rabbitmq_errors_total.inc(metrics["errors_total"])   # ✅ заменили цикл на .inc(value)
 		rabbitmq_processing_time_avg.observe(metrics["avg_processing_time"])
 		rabbitmq_processing_time_max.observe(metrics["max_processing_time"])
 	except Exception:
-		rabbitmq_errors_total.set(0)
+		rabbitmq_errors_total.inc()
 
 	# --- Метрики Redis ---
-	redis = RedisCache()
+	redis = request.app.state.redis
 	try:
 		metrics = redis.get_metrics()
 		redis_keys_total.set(metrics["keys_total"])
-		redis_errors_total.set(metrics["errors_total"])
+		redis_errors_total.inc(metrics["errors_total"])      # ✅ заменили цикл на .inc(value)
 		redis_latency_seconds.observe(metrics["avg_latency"])
 		redis_latency_summary.observe(metrics["last_latency"])
 	except Exception:
 		redis_keys_total.set(0)
-		redis_errors_total.set(0)
+		redis_errors_total.inc()
 
-	# --- Метрики индикаторов ---
+
+		# --- Метрики индикаторов ---
 	try:
 		indicator_keys = await redis.keys("indicator:*:status")
 		indicators_tasks_total.set(len(indicator_keys))
@@ -212,11 +210,11 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)) -> Response:
 		ml_precision_gauge.set(ml_cv_precision())
 		ml_recall_gauge.set(ml_cv_recall())
 		ml_loss_gauge.set(ml_loss())
-		ml_epoch_loss_gauge.set(ml_epoch_loss())  # ✅ добавлено
+		ml_epoch_loss_gauge.set(ml_epoch_loss())
 		ml_training_time_gauge.set(ml_training_time())
 		ml_learning_rate_gauge.set(ml_learning_rate())
-		ml_cv_accuracy_gauge.set(ml_cv_accuracy())  # ✅ добавлено
-		ml_cv_loss_gauge.set(ml_cv_loss())          # ✅ добавлено
+		ml_cv_accuracy_gauge.set(ml_cv_accuracy())
+		ml_cv_loss_gauge.set(ml_cv_loss())
 		ml_training_runs_total.inc()
 		ml_predictions_total.inc()
 		ml_prediction_confidence.observe(0.85)  # пример: confidence модели
@@ -232,6 +230,7 @@ def log_error():
 	увеличивает счётчики ошибок для торговли, RabbitMQ, индикаторов и Qdrant.
 	"""
 	errors_counter.inc()
-	rabbitmq_errors_total.set(rabbitmq_errors_total._value.get() + 1)
+	rabbitmq_errors_total.inc()
 	indicators_tasks_errors.inc()
 	VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="general").inc()
+

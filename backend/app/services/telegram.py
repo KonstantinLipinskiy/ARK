@@ -60,7 +60,7 @@ class TelegramService:
 		"""Уведомление о сделке с расширенным форматом (PnL, SL, TP)."""
 		async with get_session() as session:
 			if user_id:
-				result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+				result = await session.execute(select(UserORM).where(UserORM.id == user_id))
 				user = result.scalars().first()
 				if user:
 					msg = (
@@ -82,7 +82,7 @@ class TelegramService:
 		"""Уведомление о новом сигнале."""
 		async with get_session() as session:
 			if user_id:
-				result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+				result = await session.execute(select(UserORM).where(UserORM.id == user_id))
 				user = result.scalars().first()
 				if user:
 					msg = (
@@ -101,7 +101,7 @@ class TelegramService:
 		"""Уведомление об ошибке."""
 		async with get_session() as session:
 			if user_id:
-				result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+				result = await session.execute(select(UserORM).where(UserORM.id == user_id))
 				user = result.scalars().first()
 				if user:
 					msg = (
@@ -152,7 +152,7 @@ broker = RabbitMQBroker()
 # -------------------------------------------------------------------
 async def get_user_by_chat_id(chat_id: int) -> UserORM | None:
 	async with get_session() as session:
-		result = await session.execute(select(UserORM).filter(UserORM.telegram_id == str(chat_id)))
+		result = await session.execute(select(UserORM).where(UserORM.telegram_id == str(chat_id)))
 		return result.scalars().first()
 
 async def is_authorized(message: types.Message) -> bool:
@@ -179,18 +179,20 @@ async def start_command(message: types.Message):
 async def status_command(message: types.Message):
 	if not await is_authorized(message):
 		return
-		async with get_session() as session:
-			result = await session.execute(select(TradeORM).order_by(TradeORM.timestamp.desc()).limit(10))
-			trades = result.scalars().all()
-			if trades:
-				msg = "\n".join([
-					f"{t.symbol} {t.side} {t.amount} @ {t.price} "
-					f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
-					for t in trades
-				])
-				await message.answer(f"📊 Последние сделки:\n{msg}")
-			else:
-				await message.answer("История сделок пуста.")
+	async with get_session() as session:
+		result = await session.execute(
+			select(TradeORM).order_by(TradeORM.timestamp.desc()).limit(10)
+		)
+		trades = result.scalars().all()
+		if trades:
+			msg = "\n".join([
+				f"{t.symbol} {t.side} {t.amount} @ {t.price} "
+				f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
+				for t in trades
+			])
+			await message.answer(f"📊 Последние сделки:\n{msg}")
+		else:
+			await message.answer("История сделок пуста.")
 
 @dp.message(Command("report"))
 async def report_command(message: types.Message):

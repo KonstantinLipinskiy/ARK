@@ -1,12 +1,12 @@
+#app/services/backtest.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from numba import njit
 from sqlalchemy.ext.asyncio import AsyncSession
 import os
-import pandas as pd
 
 from app.services import indicators, risk
 from app.services.ml import MLService
@@ -19,9 +19,6 @@ from app.db import crud
 from app.models.trade import Trade
 from scripts.fetch_data import update_csv, PAIRS
 
-
-
-# --- ML Service ---
 ml_service = MLService()
 ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
 
@@ -29,12 +26,11 @@ broker = RabbitMQBroker()
 asyncio.create_task(broker.connect())
 
 def build_features(row: pd.Series) -> dict:
-	"""Формируем полный набор признаков для ML модели из строки DataFrame."""
 	return {
 		"ema": row.get("ema_short", 0),
 		"rsi": row.get("rsi", 50),
 		"macd": row.get("macd_line", 0),
-		"hour": pd.to_datetime(row.get("timestamp", datetime.utcnow())).hour,
+		"hour": pd.to_datetime(row.get("timestamp", datetime.now(timezone.utc))).hour,
 		"atr": row.get("atr", 0),
 		"bollinger_upper": row.get("boll_upper", 0),
 		"bollinger_lower": row.get("boll_lower", 0),
@@ -59,7 +55,7 @@ def fast_equity_curve(profits: np.ndarray, initial_deposit: float):
 	drawdowns = (equity_curve - peak) / peak
 	return equity_curve, drawdowns
 
-async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, session: AsyncSession = None):
+async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 	trades = []
 	position = None
 	market_type = settings.TRADING_MODE
@@ -192,6 +188,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 
 					position = {
 						"entry": entry_price,
+						"entry_index": row.name,
 						"stop": stop_price,
 						"tp": tp_levels,
 						"status": "open",
@@ -228,7 +225,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 			price = row["close"]
 			if position["side"] == "long":
 				if price <= position["stop"]:
-					position["exit"] = price; position["status"] = "stopped"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "stopped"
 					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
 					logger.info(
 						f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
@@ -240,7 +237,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] - strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price <= dynamic_stop:
-						position["exit"] = price; position["status"] = "atr_stop"
+						position["exit"] = price; position["exit_index"] = row.name;position["status"] = "atr_stop"
 						pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
 						logger.info(
 							f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
@@ -249,7 +246,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 						)
 						trades.append(position); position = None
 				elif price >= position["tp"][0]:
-					position["exit"] = price; position["status"] = "take_profit"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "take_profit"
 					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
 					logger.info(
 						f"✅ Trade take_profit | {pair} | side=long | entry={position['entry']} | exit={price} "
@@ -262,7 +259,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 
 			elif position["side"] == "short":
 				if price >= position["stop"]:
-					position["exit"] = price; position["status"] = "stopped"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "stopped"
 					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
 					logger.info(
 						f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
@@ -274,7 +271,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] + strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price >= dynamic_stop:
-						position["exit"] = price; position["status"] = "atr_stop"
+						position["exit"] = price; position["exit_index"] = row.name; position["status"] = "atr_stop"
 						pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
 						logger.info(
 							f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
@@ -283,7 +280,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 						)
 						trades.append(position); position = None
 				elif price <= position["tp"][0]:
-					position["exit"] = price; position["status"] = "take_profit"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "take_profit"
 					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
 					logger.info(
 						f"✅ Trade take_profit | {pair} | side=short | entry={position['entry']} | exit={price} "
@@ -294,6 +291,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict, sessi
 					position["tp"].pop(0)
 					if len(position["tp"]) == 0: position = None
 	return trades
+
 
 # --- Метрики ---
 def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
@@ -338,40 +336,43 @@ def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
 
 	return metrics
 
-# --- Сохранение сделок и метрик ---
-async def save_trades_to_db(trades, pair: str, strategy_name: str = "default", user_id: int = 1):
-	async with get_session() as session:
-		for t in trades:
-			trade_model = Trade(
-				symbol=pair,
-				side=t.get("side", "buy"),
-				amount=t.get("amount", 1.0),
-				price=t["entry"],
-				status=t["status"],
-				leverage=t.get("leverage", 1.0),
-				user_id=user_id,
-				entry_price=t["entry"],
-				exit_price=t.get("exit"),
-				profit_loss=((t.get("exit", 0) - t["entry"]) - (t["entry"] * (settings.COMMISSION_RATE + settings.SLIPPAGE_TOLERANCE)))
-							* t.get("amount", 1.0) * t.get("leverage", 1) if "exit" in t else None,
-				news_sentiment=t.get("news_sentiment", 0)
-			)
-			await crud.create_trade(session, trade_model)
 
-async def save_metrics_to_db(metrics: dict, pair: str, strategy_name: str = "default", user_id: int = 1):
-	async with get_session() as session:
-		report_data = {
-			"symbol": pair,
-			"strategy": strategy_name,
-			"winrate": metrics["winrate"],
-			"avg_profit": metrics["avg_profit"],
-			"max_drawdown": metrics["max_drawdown"],
-			"sharpe": metrics["sharpe"],
-			"avg_sentiment_win": metrics["avg_sentiment_win"],
-			"avg_sentiment_loss": metrics["avg_sentiment_loss"],
-			"user_id": user_id
-		}
-		await crud.create_backtest_report(session, report_data)
+# --- Сохранение сделок и метрик ---
+async def save_trades_to_db(trades, pair: str, strategy_name: str = "default", user_id: int = 1, session: AsyncSession = None):
+	for t in trades:
+		trade_model = Trade(
+			symbol=pair,
+			side=t.get("side", "buy"),
+			amount=t.get("amount", 1.0),
+			price=t["entry"],
+			status=t["status"],
+			leverage=t.get("leverage", 1.0),
+			user_id=user_id,
+			entry_price=t["entry"],
+			exit_price=t.get("exit"),
+			profit_loss=(
+				((t.get("exit", 0) - t["entry"]) - (t["entry"] * (settings.COMMISSION_RATE + settings.SLIPPAGE_TOLERANCE)))
+				* t.get("amount", 1.0) * t.get("leverage", 1)
+				if "exit" in t else None
+			),
+			news_sentiment=t.get("news_sentiment", 0)
+		)
+		await crud.create_trade(session, trade_model)
+
+async def save_metrics_to_db(metrics: dict, pair: str, strategy_name: str = "default", user_id: int = 1, session: AsyncSession = None):
+	report_data = {
+		"symbol": pair,
+		"strategy": strategy_name,
+		"winrate": metrics["winrate"],
+		"avg_profit": metrics["avg_profit"],
+		"max_drawdown": metrics["max_drawdown"],
+		"sharpe": metrics["sharpe"],
+		"avg_sentiment_win": metrics["avg_sentiment_win"],
+		"avg_sentiment_loss": metrics["avg_sentiment_loss"],
+		"user_id": user_id
+	}
+	await crud.create_backtest_report(session, report_data)
+
 
 # --- Визуализация ---
 def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: str):
@@ -392,20 +393,31 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: st
 		plt.plot(data["boll_lower"], label="Bollinger Lower", linestyle="--", color="grey")
 
 	for t in trades:
-		entry_idx = int(np.argmin(np.abs(data["close"].values - t["entry"])))
-		plt.axvline(x=entry_idx, color="green", linestyle="--")
-		plt.text(entry_idx, t["entry"], f"x{t.get('leverage',1)}",
-					color="black", fontsize=8, rotation=90)
+		entry_idx = t.get("entry_index")
+		if entry_idx is not None:
+			plt.axvline(x=entry_idx, color="green", linestyle="--")
+			plt.text(entry_idx, t["entry"], f"x{t.get('leverage',1)}",
+						color="black", fontsize=8, rotation=90)
 
 		if "exit" in t:
-			exit_idx = int(np.argmin(np.abs(data["close"].values - t["exit"])))
-			plt.axvline(x=exit_idx, color="red", linestyle="--")
+			exit_idx = t.get("exit_index")
+			if exit_idx is not None:
+				plt.axvline(x=exit_idx, color="red", linestyle="--")
 
 	plt.title(f"Backtest {pair} — {strategy_name} — Mode: {settings.TRADING_MODE}")
 	plt.xlabel("Time")
 	plt.ylabel("Price / Indicators")
 	plt.legend()
-	plt.show()
+
+	os.makedirs("data/plots", exist_ok=True)
+	safe_pair = pair.replace("/", "_")
+	timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+	file_path = f"data/plots/backtest_{safe_pair}_{strategy_name}_{timestamp}.png"
+	plt.savefig(file_path)
+	plt.close()
+
+	logger.info(f"📊 График сохранён: {file_path}")
+
 
 # --- Пример запуска ---
 if __name__ == "__main__":
@@ -433,14 +445,16 @@ if __name__ == "__main__":
 
 					async def run_single_backtest(pair=pair, strategy=strategy, strategy_name=strategy_name, df=df.copy()):
 						try:
-							results = await backtest_strategy(df, pair, strategy, session=session)
+							# ✅ убран лишний аргумент session=session
+							results = await backtest_strategy(df, pair, strategy)
 							metrics = calculate_metrics(results, initial_deposit=settings.DEFAULT_DEPOSIT)
 
 							all_metrics[f"{pair}_{strategy_name}"] = metrics
 							all_results[f"{pair}_{strategy_name}"] = results
 
-							await save_trades_to_db(results, pair, strategy_name=strategy_name)
-							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name)
+							# ✅ Передаём открытую сессию только в функции сохранения
+							await save_trades_to_db(results, pair, strategy_name=strategy_name, session=session)
+							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name, session=session)
 
 							# 🔹 Визуализация только в dev-режиме
 							if getattr(settings, "ENV", "dev") == "dev":
@@ -460,9 +474,10 @@ if __name__ == "__main__":
 
 					tasks.append(run_single_backtest())
 
-			await asyncio.gather(*tasks)
+		await asyncio.gather(*tasks)
 
 	loop.run_until_complete(run_backtests())
+
 
 	# 🔹 Батч-обучение ML на всех сделках
 	all_trades = []

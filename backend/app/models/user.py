@@ -1,3 +1,4 @@
+#app/models/user.py
 from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, Dict
 from datetime import datetime, timezone
@@ -116,6 +117,35 @@ class UserOut(BaseModel):
 				"is_admin": True,
 				"settings": {
 					"risk_profile": "aggressive",
+					"notifications_enabled": True
+				}
+			}
+		}
+
+
+class UserUpdate(BaseModel):
+	username: Optional[str] = Field(None, min_length=3, max_length=50, description="Имя пользователя")
+	email: Optional[EmailStr] = Field(None, description="Email пользователя")
+	role: Optional[Literal["admin", "trader"]] = Field(None, description="Роль пользователя")
+	status: Optional[Literal["active", "blocked"]] = Field(None, description="Статус пользователя")
+	telegram_id: Optional[str] = Field(None, description="Telegram ID для интеграции с ботом")
+	is_admin: Optional[bool] = Field(None, description="Флаг администратора")
+	settings: Optional[Dict] = Field(
+		default=None,
+		description="Настройки пользователя (например, risk_profile, notifications_enabled)"
+	)
+
+	class Config:
+		json_schema_extra = {
+			"example": {
+				"username": "updated_user",
+				"email": "updated@example.com",
+				"role": "trader",
+				"status": "active",
+				"telegram_id": "987654321",
+				"is_admin": False,
+				"settings": {
+					"risk_profile": "moderate",
 					"notifications_enabled": True
 				}
 			}

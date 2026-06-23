@@ -148,10 +148,16 @@ class BacktestReport(Base):
 	avg_profit = Column(Float, nullable=False)
 	max_drawdown = Column(Float, nullable=False)
 	sharpe = Column(Float, nullable=False)
+
+	# 🔹 Новые поля для sentiment метрик
+	avg_sentiment_win = Column(Float, nullable=True)
+	avg_sentiment_loss = Column(Float, nullable=True)
+
 	created_at = Column(DateTime, server_default=func.now())
 
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="backtest_reports")
+
 
 class StrategyORM(Base):
 	__tablename__ = "strategies"

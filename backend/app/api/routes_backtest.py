@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional
+from datetime import datetime
 
 from app.db.session import get_session
 from app.db import crud
@@ -13,6 +14,16 @@ from app.utils.logger import (
 )
 
 router = APIRouter(prefix="/api", tags=["Backtest"])
+
+# ---------- Вспомогательная функция для парсинга дат ----------
+def parse_date(date_str: Optional[str]) -> Optional[datetime]:
+	if date_str:
+		try:
+			return datetime.fromisoformat(date_str)
+		except ValueError:
+			logger.warning(f"⚠️ Некорректный формат даты: {date_str}")
+			return None
+	return None
 
 # ---------- Backtest Reports ----------
 @router.get("/backtest/reports")
@@ -35,8 +46,8 @@ async def get_backtest_reports(
 			symbol=symbol,
 			strategy=strategy,
 			user_id=user_id,
-			date_from=date_from,
-			date_to=date_to
+			date_from=parse_date(date_from),
+			date_to=parse_date(date_to)
 		)
 	except SQLAlchemyError as e:
 		log_order_error("get_backtest_reports", e)
@@ -61,8 +72,8 @@ async def get_trades(
 			limit=limit,
 			symbol=symbol,
 			status=status,
-			date_from=date_from,
-			date_to=date_to
+			date_from=parse_date(date_from),
+			date_to=parse_date(date_to)
 		)
 	except SQLAlchemyError as e:
 		log_order_error("get_trades", e)
@@ -90,8 +101,8 @@ async def get_risk_logs(
 			limit=limit,
 			symbol=symbol,
 			reason=reason,
-			date_from=date_from,
-			date_to=date_to,
+			date_from=parse_date(date_from),
+			date_to=parse_date(date_to),
 			sentiment=sentiment,
 			profit_loss_min=profit_loss_min,
 			profit_loss_max=profit_loss_max

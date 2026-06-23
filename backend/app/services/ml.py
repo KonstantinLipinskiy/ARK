@@ -712,10 +712,10 @@ class MLService:
 			path = ml_model.path
 			params = ml_model.params or {}
 
-			# загружаем модель
+			# загружаем модель (без внутреннего логирования)
 			self.load_model(path=path, model_type=model_type)
 
-			# Логирование загрузки из БД
+			# Логирование загрузки из БД — только один раз
 			log_model_load(model_type, path, params)
 
 			return ml_model

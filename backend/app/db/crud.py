@@ -11,22 +11,32 @@ from app.models.user import User, UserCreate
 from app.utils.logger import logger
 from app.config import settings
 from app.utils.security import hash_password
+from app.models.user import UserUpdate
 from datetime import datetime, timedelta, timezone
 
 
 # ---------- Trades ----------
 async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
 	try:
+		# ⚙️ Корректируем плечо в зависимости от режима торговли
 		leverage = trade.leverage if trade.leverage else 1.0
 		if settings.TRADING_MODE == "spot":
 			leverage = 1.0
 
+		# ⚙️ Приведение статуса к Enum TradeStatus
+		status = (
+			schemas.TradeStatus(trade.status)
+			if isinstance(trade.status, str)
+			else trade.status
+		)
+
+		# ⚙️ Создание ORM объекта
 		db_trade = schemas.TradeORM(
 			symbol=trade.symbol,
 			side=trade.side,
 			amount=trade.amount,
 			price=trade.price,
-			status=trade.status,
+			status=status,
 			signal_id=trade.signal_id,
 			user_id=trade.user_id,
 			entry_price=trade.entry_price,
@@ -37,12 +47,15 @@ async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
 			take_profit=getattr(trade, "take_profit", None),
 			confidence_score=getattr(trade, "confidence_score", None),
 			risk_reason=getattr(trade, "risk_reason", None),
-			exchange_order_id=getattr(trade, "exchange_order_id", None)
+			exchange_order_id=getattr(trade, "exchange_order_id", None),
+			# timestamp не передаём — его выставит БД через server_default=func.now()
 		)
+
 		db.add(db_trade)
 		await db.commit()
 		await db.refresh(db_trade)
 		return db_trade
+
 	except IntegrityError as e:
 		await db.rollback()
 		logger.error(f"Ошибка уникальности при создании сделки: {e}")
@@ -52,12 +65,15 @@ async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
 		logger.error(f"Ошибка БД при создании сделки: {e}")
 		raise
 
+
 async def get_trades(
 	db: AsyncSession,
 	skip: int = 0,
 	limit: int = 100,
 	symbol: str = None,
 	status: str = None,
+	user_id: int = None,
+	signal_id: int = None,
 	date_from: datetime = None,
 	date_to: datetime = None
 ):
@@ -69,6 +85,10 @@ async def get_trades(
 		query = query.filter(schemas.TradeORM.symbol == symbol)
 	if status:
 		query = query.filter(schemas.TradeORM.status == status)
+	if user_id:
+		query = query.filter(schemas.TradeORM.user_id == user_id)
+	if signal_id:
+		query = query.filter(schemas.TradeORM.signal_id == signal_id)
 	if date_from:
 		query = query.filter(schemas.TradeORM.timestamp >= date_from)
 	if date_to:
@@ -88,17 +108,28 @@ async def get_trades(
 		"page_size": limit
 	}
 
+
+async def get_trade_by_id(db: AsyncSession, trade_id: int) -> schemas.TradeORM | None:
+	"""Получить сделку по её ID."""
+	result = await db.execute(
+		select(schemas.TradeORM).filter(schemas.TradeORM.id == trade_id)
+	)
+	return result.scalars().first()
+
+
 async def get_trades_by_user(db: AsyncSession, user_id: int):
 	result = await db.execute(
 		select(schemas.TradeORM).filter(schemas.TradeORM.user_id == user_id)
 	)
 	return result.scalars().all()
 
+
 async def get_trades_by_signal(db: AsyncSession, signal_id: int):
 	result = await db.execute(
 		select(schemas.TradeORM).filter(schemas.TradeORM.signal_id == signal_id)
 	)
 	return result.scalars().all()
+
 
 async def update_trade(db: AsyncSession, trade_id: int, updates: dict):
 	result = await db.execute(select(schemas.TradeORM).filter(schemas.TradeORM.id == trade_id))
@@ -128,6 +159,7 @@ async def update_trade(db: AsyncSession, trade_id: int, updates: dict):
 		await db.rollback()
 		logger.error(f"Ошибка обновления сделки: {e}")
 		raise
+
 
 async def patch_trade(db: AsyncSession, trade_id: int, updates: dict):
 	"""Частичное обновление сделки (PATCH)."""
@@ -159,6 +191,7 @@ async def patch_trade(db: AsyncSession, trade_id: int, updates: dict):
 		logger.error(f"Ошибка PATCH обновления сделки: {e}")
 		raise
 
+
 async def delete_trade(db: AsyncSession, trade_id: int):
 	result = await db.execute(select(schemas.TradeORM).filter(schemas.TradeORM.id == trade_id))
 	db_trade = result.scalars().first()
@@ -172,6 +205,7 @@ async def delete_trade(db: AsyncSession, trade_id: int):
 		await db.rollback()
 		logger.error(f"Ошибка удаления сделки: {e}")
 		raise
+
 
 async def close_trade(db: AsyncSession, trade_id: int, exit_price: float):
 	"""Закрыть сделку и рассчитать PnL."""
@@ -191,6 +225,7 @@ async def close_trade(db: AsyncSession, trade_id: int, exit_price: float):
 		await db.rollback()
 		logger.error(f"Ошибка закрытия сделки: {e}")
 		raise
+
 
 async def cancel_trade(db: AsyncSession, trade_id: int, reason: str = "Cancelled manually"):
 	"""Отменить сделку с указанием причины."""
@@ -221,6 +256,8 @@ async def create_backtest_report(db: AsyncSession, report_data: dict) -> schemas
 			avg_profit=report_data["avg_profit"],
 			max_drawdown=report_data["max_drawdown"],
 			sharpe=report_data["sharpe"],
+			avg_sentiment_win=report_data.get("avg_sentiment_win"),
+			avg_sentiment_loss=report_data.get("avg_sentiment_loss"),
 			user_id=report_data.get("user_id", 1)
 		)
 		db.add(report)
@@ -231,6 +268,7 @@ async def create_backtest_report(db: AsyncSession, report_data: dict) -> schemas
 		await db.rollback()
 		logger.error(f"Ошибка создания отчёта бэктеста: {e}")
 		raise
+
 
 async def get_backtest_reports(db: AsyncSession, symbol: str = None, strategy: str = None, user_id: int = None):
 	query = select(schemas.BacktestReport)
@@ -378,8 +416,13 @@ async def delete_signal(db: AsyncSession, signal_id: int):
 
 # ---------- Users ----------
 async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
+	"""Создать нового пользователя."""
 	try:
 		salt, password_hash = hash_password(user.password)
+		settings = user.settings or {}
+		if "notifications_enabled" not in settings:
+			settings["notifications_enabled"] = True
+
 		db_user = schemas.UserORM(
 			username=user.username,
 			email=user.email,
@@ -388,7 +431,7 @@ async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
 			password_hash=password_hash,
 			salt=salt,
 			telegram_id=user.telegram_id,
-			settings=user.settings
+			settings=settings
 		)
 		db.add(db_user)
 		await db.commit()
@@ -403,13 +446,24 @@ async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
 		logger.error(f"Ошибка создания пользователя: {e}")
 		raise
 
-async def get_user_by_username(db: AsyncSession, username: str):
+
+async def get_user_by_id(db: AsyncSession, user_id: int) -> schemas.UserORM | None:
+	"""Получить пользователя по ID."""
+	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.id == user_id))
+	return result.scalars().first()
+
+
+async def get_user_by_username(db: AsyncSession, username: str) -> schemas.UserORM | None:
+	"""Получить пользователя по username."""
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.username == username))
 	return result.scalars().first()
 
-async def get_user_by_email(db: AsyncSession, email: str):
+
+async def get_user_by_email(db: AsyncSession, email: str) -> schemas.UserORM | None:
+	"""Получить пользователя по email."""
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.email == email))
 	return result.scalars().first()
+
 
 async def get_users(
 	db: AsyncSession,
@@ -418,16 +472,14 @@ async def get_users(
 	username: str = None,
 	role: str = None
 ):
+	"""Получить список пользователей с фильтрацией и пагинацией."""
 	query = select(schemas.UserORM)
 	if username:
 		query = query.filter(schemas.UserORM.username.ilike(f"%{username}%"))
 	if role:
 		query = query.filter(schemas.UserORM.role == role)
 
-	total_count = await db.scalar(
-		select(func.count()).select_from(query.subquery())
-	)
-
+	total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
 	result = await db.execute(query.offset(skip).limit(limit))
 	users = result.scalars().all()
 
@@ -439,7 +491,8 @@ async def get_users(
 	}
 
 
-async def update_user_status(db: AsyncSession, user_id: int, status: str):
+async def update_user_status(db: AsyncSession, user_id: int, status: str) -> schemas.UserORM | None:
+	"""Обновить статус пользователя."""
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.id == user_id))
 	db_user = result.scalars().first()
 	if not db_user:
@@ -454,7 +507,9 @@ async def update_user_status(db: AsyncSession, user_id: int, status: str):
 		logger.error(f"Ошибка обновления статуса пользователя: {e}")
 		raise
 
-async def update_user(db: AsyncSession, user_id: int, updates: dict):
+
+async def update_user(db: AsyncSession, user_id: int, updates: UserUpdate) -> schemas.UserORM | None:
+	"""Обновить данные пользователя через UserUpdate."""
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.id == user_id))
 	db_user = result.scalars().first()
 	if not db_user:
@@ -465,9 +520,15 @@ async def update_user(db: AsyncSession, user_id: int, updates: dict):
 		"telegram_id", "password_hash", "salt",
 		"last_login", "updated_at", "settings"
 	}
-	for key, value in updates.items():
+
+	update_data = updates.dict(exclude_unset=True)
+
+	for key, value in update_data.items():
 		if key in allowed_fields:
-			setattr(db_user, key, value)
+			if key == "settings" and value:
+				db_user.settings.update(value)
+			else:
+				setattr(db_user, key, value)
 
 	try:
 		await db.commit()
@@ -478,7 +539,9 @@ async def update_user(db: AsyncSession, user_id: int, updates: dict):
 		logger.error(f"Ошибка обновления пользователя: {e}")
 		raise
 
-async def delete_user(db: AsyncSession, user_id: int):
+
+async def delete_user(db: AsyncSession, user_id: int) -> bool:
+	"""Удалить пользователя по ID."""
 	result = await db.execute(select(schemas.UserORM).filter(schemas.UserORM.id == user_id))
 	db_user = result.scalars().first()
 	if not db_user:
@@ -491,6 +554,7 @@ async def delete_user(db: AsyncSession, user_id: int):
 		await db.rollback()
 		logger.error(f"Ошибка удаления пользователя: {e}")
 		raise
+
 
 # ---------- Indicators ----------
 async def save_indicator(db: AsyncSession, pair: str, name: str, value: str) -> schemas.IndicatorORM:
@@ -873,6 +937,7 @@ async def delete_ml_model(db: AsyncSession, model_id: int) -> bool:
 
 
 # ---------- Risk Settings ----------
+
 async def get_risk_settings(db: AsyncSession) -> schemas.RiskSettingsORM | None:
 	"""Получить текущие параметры риска (берём первую запись)."""
 	result = await db.execute(select(schemas.RiskSettingsORM).limit(1))

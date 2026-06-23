@@ -1,5 +1,5 @@
 # app/api/routes_signals.py
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
@@ -26,7 +26,7 @@ ml_service = MLService()
 try:
 	ml_service.load_model(settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
 except Exception:
-	ml_service.model = None 
+	ml_service.model = None
 
 # --- News Loader ---
 news_loader = NewsLoader(newsdata_api_key=settings.NEWSDATA_API_KEY)
@@ -63,7 +63,7 @@ async def get_signals(
 
 @router.get("/{signal_id}", response_model=Signal)
 async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
-	result = await crud.update_signal(db, signal_id, {}) 
+	result = await crud.get_signal_by_id(db, signal_id)
 	if not result:
 		raise HTTPException(status_code=404, detail="Signal not found")
 	logger.info(f"🔎 Получен сигнал ID={signal_id}")
@@ -72,11 +72,13 @@ async def get_signal(signal_id: int, db: AsyncSession = Depends(get_db)):
 @router.post("/", response_model=Signal)
 async def create_signal(
 	signal: Signal,
+	request: Request,
 	db: AsyncSession = Depends(get_db),
 	current_user: dict = Depends(get_current_user)
 ):
-	broker = db.bind.app.state.broker
-	redis_client = db.bind.app.state.redis
+	# ✅ Доступ к RabbitMQ и Redis через app.state
+	broker = request.app.state.broker
+	redis_client = request.app.state.redis
 
 	if signal.direction not in ["buy", "sell"]:
 		raise HTTPException(status_code=400, detail="Direction must be 'buy' or 'sell'")

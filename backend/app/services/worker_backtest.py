@@ -1,4 +1,4 @@
-# app/workers/worker_backtest.py
+#app/services/worker_backtest.py
 import asyncio
 import json
 import pandas as pd
@@ -10,7 +10,6 @@ from app.services.backtest import (
 	plot_backtest
 )
 from app.services.ml import MLService
-from app.services.exchange import load_strategies
 from app.db.session import get_session
 from app.broker.rabbitmq import RabbitMQBroker
 from app.utils.logger import logger
@@ -21,25 +20,11 @@ ml_service = MLService()
 ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
 
 class BacktestWorker:
-	"""
-	Воркер для запуска бэктестов через RabbitMQ.
-	Слушает очередь, принимает задачи и выполняет бэктесты асинхронно.
-	"""
-
 	def __init__(self, queue_name: str = "backtest_queue"):
 		self.queue_name = queue_name
 		self.broker = RabbitMQBroker()
 
 	async def process_message(self, message: dict):
-		"""
-		Обработка одного сообщения из очереди.
-		message должен содержать:
-		{
-			"pair": "BTC/USDT",
-			"strategies": [...],
-			"data_file": "data/BTCUSDT_1h.csv"
-		}
-		"""
 		try:
 			pair = message.get("pair")
 			strategies = message.get("strategies", [])
@@ -58,13 +43,12 @@ class BacktestWorker:
 
 					async def run_single_backtest(strategy=strategy, strategy_name=strategy_name, df=df.copy()):
 						try:
-							results = await backtest_strategy(df, pair, strategy, session=session)
+							results = await backtest_strategy(df, pair, strategy)
 							metrics = calculate_metrics(results)
 
-							await save_trades_to_db(results, pair, strategy_name=strategy_name)
-							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name)
+							await save_trades_to_db(results, pair, strategy_name=strategy_name, session=session)
+							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name, session=session)
 
-							# --- Автоматическое обучение и сохранение модели ---
 							try:
 								df_trades = pd.DataFrame(results)
 								if not df_trades.empty:
@@ -75,59 +59,30 @@ class BacktestWorker:
 									ml_service.save_model(settings.MODEL_PATH)
 									logger.info(f"🤖 ML обучение завершено для {pair} ({strategy_name}): {train_metrics}")
 							except Exception as e:
-								logger.error(f"❌ Ошибка обучения ML на истории {pair} ({strategy_name}): {e}")
-								await crud.create_risk_log(session, {
-									"reason": f"ML training failed: {e}",
-									"symbol": pair,
-									"position_size": None,
-									"deposit": settings.DEFAULT_DEPOSIT,
-									"sentiment": None,
-									"profit_loss": None,
-									"expected_pnl": None
-								})
+								logger.error(f"❌ Ошибка обучения ML: {e}")
+								await crud.create_risk_log(session, {"reason": f"ML training failed: {e}", "symbol": pair})
 
 							logger.info(f"✅ Backtest completed for {pair} ({strategy_name}) — {metrics}")
 
-							# --- Визуализация только при DEBUG_EXPORT ---
 							if settings.DEBUG_EXPORT:
 								try:
 									plot_backtest(df, results, pair, strategy_name)
 								except Exception as e:
 									logger.error(f"Ошибка визуализации {pair} ({strategy_name}): {e}")
-									await crud.create_risk_log(session, {
-										"reason": f"Plot failed: {e}",
-										"symbol": pair,
-										"position_size": None,
-										"deposit": settings.DEFAULT_DEPOSIT,
-										"sentiment": None,
-										"profit_loss": None,
-										"expected_pnl": None
-									})
+									await crud.create_risk_log(session, {"reason": f"Plot failed: {e}", "symbol": pair})
 
 						except Exception as e:
 							logger.error(f"❌ Ошибка бэктеста для {pair} ({strategy_name}): {e}")
-							await crud.create_risk_log(session, {
-								"reason": f"Backtest failed: {e}",
-								"symbol": pair,
-								"position_size": None,
-								"deposit": settings.DEFAULT_DEPOSIT,
-								"sentiment": None,
-								"profit_loss": None,
-								"expected_pnl": None
-							})
+							await crud.create_risk_log(session, {"reason": f"Backtest failed: {e}", "symbol": pair})
 
 					tasks.append(run_single_backtest())
 
-				# Запускаем все бэктесты параллельно
 				await asyncio.gather(*tasks)
 
 		except Exception as e:
 			logger.error(f"❌ BacktestWorker error: {e}")
 
 	async def start(self):
-		"""
-		Запуск воркера: слушает очередь RabbitMQ и обрабатывает задачи.
-		"""
 		logger.info(f"🚀 BacktestWorker started, listening on queue: {self.queue_name}")
 		await self.broker.consume(
 			queue_name=self.queue_name,

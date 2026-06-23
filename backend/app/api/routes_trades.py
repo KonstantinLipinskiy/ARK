@@ -1,5 +1,5 @@
 # app/api/routes_trades.py
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
@@ -8,19 +8,14 @@ from app.models.trade import Trade
 from app.db.session import get_db
 from app.db import crud
 from app.services.telegram import send_trade_notification
-from app.broker.rabbitmq import RabbitMQBroker
-from app.cache.redis import RedisCache
 from app.utils.logger import (
 	logger,
 	log_order_error,
 	log_signal_rejected,
-	)
+)
 from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/trades", tags=["trades"])
-
-rabbitmq = RabbitMQBroker()
-redis_cache = RedisCache()
 
 @router.get("/")
 async def get_trades(
@@ -42,19 +37,15 @@ async def get_trades(
 			limit=limit,
 			symbol=symbol,
 			status=status,
+			user_id=user_id,
+			signal_id=signal_id,
 			date_from=date_from,
 			date_to=date_to
 		)
 
-		items = result["items"]
-		if user_id:
-			items = [t for t in items if t.user_id == user_id]
-		if signal_id:
-			items = [t for t in items if t.signal_id == signal_id]
-
-		logger.info(f"📊 Получены сделки: {len(items)} шт. (total={result['total_count']})")
+		logger.info(f"📊 Получены сделки: {len(result['items'])} шт. (total={result['total_count']})")
 		return {
-			"items": items,
+			"items": result["items"],
 			"total_count": result["total_count"],
 			"page": result["page"],
 			"page_size": result["page_size"]
@@ -65,21 +56,30 @@ async def get_trades(
 
 @router.get("/{trade_id}", response_model=Trade)
 async def get_trade(trade_id: int, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
-	trade = await crud.update_trade(db, trade_id, {})
+	trade = await crud.get_trade_by_id(db, trade_id)
 	if not trade:
 		raise HTTPException(status_code=404, detail="Trade not found")
 	logger.info(f"🔎 Получена сделка ID={trade_id}")
 	return trade
 
 @router.post("/", response_model=Trade)
-async def create_trade(trade: Trade, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def create_trade(
+	trade: Trade,
+	request: Request,
+	db: AsyncSession = Depends(get_db),
+	current_user: dict = Depends(get_current_user)
+):
+	# ✅ Доступ к RabbitMQ и Redis через app.state
+	broker = request.app.state.broker
+	redis_client = request.app.state.redis
+
 	try:
 		new_trade = await crud.create_trade(db, trade)
 
-		await rabbitmq.publish_trade(new_trade.dict())
+		await broker.publish_trade(new_trade.dict())
 		logger.info(f"📤 Сделка опубликована в RabbitMQ: {new_trade.symbol}")
 
-		await redis_cache.set_json("last_trade", new_trade.dict(), expire=300)
+		await redis_client.set_json("last_trade", new_trade.dict(), expire=300)
 		logger.info(f"💾 Сделка сохранена в Redis: {new_trade.symbol}")
 
 		msg = (

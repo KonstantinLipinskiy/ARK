@@ -13,7 +13,7 @@ from app.utils.security import get_current_admin
 from app.utils.logger import (
 	logger,
 	log_order_error,
-)  # ✅ используем централизованную функцию
+)
 from app.utils.metrics import calculate_metrics
 from app.services.telegram import telegram_service
 
@@ -26,8 +26,8 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 		active_signals = await db.scalar(select(func.count()).select_from(SignalORM).filter(SignalORM.status == "active"))
 		users = await db.scalar(select(func.count()).select_from(UserORM))
 
-		wins = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.profit > 0))
-		avg_profit = await db.scalar(select(func.avg(TradeORM.profit)))
+		wins = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.profit_loss > 0))
+		avg_profit = await db.scalar(select(func.avg(TradeORM.profit_loss)))
 		active_positions = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "open"))
 		cancelled_trades = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "cancelled"))
 

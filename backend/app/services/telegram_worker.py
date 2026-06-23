@@ -21,8 +21,11 @@ reports_service = ReportsService()
 async def get_user_by_id(user_id: int) -> UserORM | None:
 	"""Получить пользователя по его ID из БД."""
 	async with get_session() as session:
-		result = await session.execute(select(UserORM).filter(UserORM.id == user_id))
+		result = await session.execute(
+			select(UserORM).where(UserORM.id == user_id)  # ✅ заменено на .where()
+		)
 		return result.scalars().first()
+
 
 async def process_notification(message: str):
 	"""

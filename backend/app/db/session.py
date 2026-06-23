@@ -45,9 +45,30 @@ SessionLocal_TESTNET = sessionmaker(
 	autocommit=False
 )
 
+# 🔹 Универсальный алиас для использования в main.py
+if settings.USE_TESTNET or settings.ENV == "testnet":
+	async_session = SessionLocal_TESTNET
+else:
+	async_session = SessionLocal_MAINNET
+
 # 🔹 Dependency для FastAPI
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-	"""Выбор движка в зависимости от окружения"""
+	"""Выбор движка в зависимости от окружения (для FastAPI dependency)."""
+	if settings.USE_TESTNET or settings.ENV == "testnet":
+		session_factory = SessionLocal_TESTNET
+	else:
+		session_factory = SessionLocal_MAINNET
+
+	async with session_factory() as session:
+		try:
+			yield session
+		except SQLAlchemyError as e:
+			logger.error(f"Database error: {e}")
+			raise
+
+# 🔹 Универсальный метод для сервисов (например, backtest.py)
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+	"""Асинхронная сессия для сервисов (backtest, crud и т.д.)."""
 	if settings.USE_TESTNET or settings.ENV == "testnet":
 		session_factory = SessionLocal_TESTNET
 	else:

@@ -13,7 +13,7 @@ from app.monitoring import prometheus
 from app.utils.logger import logger
 from prometheus_client import Counter, Histogram
 from sqlalchemy import event
-from app.db.session import engine_mainnet, engine_testnet, async_session
+from app.db.session import engine_mainnet, engine_testnet, get_session
 from app.services.risk import RiskService
 
 REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests")
@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 	await init_redis()
 
 	# ✅ создаём RiskService и явно подтягиваем конфиги
-	async with async_session() as db_session:
+	async with get_session() as db_session:
 		app.state.risk_service = RiskService(db_session)
 		await app.state.risk_service.refresh_config()
 
