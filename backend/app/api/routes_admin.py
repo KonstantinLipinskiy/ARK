@@ -1,3 +1,4 @@
+#app/api/routers_admin.py
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select

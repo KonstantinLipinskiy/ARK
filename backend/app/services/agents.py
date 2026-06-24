@@ -159,9 +159,23 @@ class AgentsService:
 			return f"❌ Риск превышен: убыток {trade['loss']} > {max_loss}"
 		return "✅ Риск в пределах лимита"
 
-	def execute_order(self, order: dict) -> str:
-		result = self.orders.place_order(order)
-		return f"Order executed: {result}"
+	async def execute_order(self, order: dict) -> str:
+		"""
+		Исполнение торгового ордера через OrdersService.
+		Исправлено: распаковка dict и публикация ошибок в RabbitMQ.
+		"""
+		try:
+			result = await self.orders.place_order(**order)  # ✅ распаковка dict
+			return f"✅ Order executed: {result}"
+		except Exception as e:
+			# Публикуем ошибку в RabbitMQ, как в orders.py
+			if self.orders.broker:
+				await self.orders.broker.publish_telegram({
+					"type": "error",
+					"error": f"Order execution failed: {e}"
+				})
+			logger.error(f"❌ Ошибка исполнения ордера: {e}")
+			return f"❌ Ошибка исполнения ордера: {e}"
 
 	def metrics_report(self, trades: list[dict]) -> str:
 		metrics = calculate_metrics(trades)

@@ -589,9 +589,23 @@ class MLService:
 
 		return result
 
+	def predict(self, inputs: list[dict], model_type: str = "sklearn") -> list[dict]:
+		"""
+		Батч‑прогноз для списка признаков.
+		Возвращает список словарей с success_probability и confidence_score.
+		"""
+		if not self.model:
+			raise ValueError("Model not trained")
+		results = []
+		for features in inputs:
+			res = self.predict_with_confidence(features)
+			results.append(res)
+		return results
+
 	def get_confidence_score(self, features: dict) -> float:
 		result = self.predict_with_confidence(features)
 		return result["confidence_score"]
+
 
 	# --- АНАЛИЗ НОВОСТЕЙ ---
 	def analyze_news(self, text: str) -> dict:
@@ -755,3 +769,4 @@ class MLService:
 			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}",
 							extra={"operation": "insert", "collection": "signals"})
 			return {"error": str(e)}
+
