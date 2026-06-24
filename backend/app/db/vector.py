@@ -21,6 +21,7 @@ class VectorDB:
 			self.collection_name = collection_name or settings.QDRANT_COLLECTION
 			self.vector_size = settings.QDRANT_VECTOR_SIZE
 			self.distance_metric = getattr(models.Distance, settings.QDRANT_DISTANCE)
+			self._last_search_latency = None
 			self._init_collection()
 		except Exception as e:
 			logger.error(f"Ошибка подключения к Qdrant: {e}")
@@ -191,3 +192,57 @@ class VectorDB:
 			logger.error(f"Ошибка удаления коллекции: {e}")
 			VECTOR_ERRORS_TOTAL.labels(collection=self.collection_name, operation="drop_collection").inc()
 			return {"error": str(e)}
+
+	def search(self, query_vector: list[float], top_k: int = 5):
+		"""Централизованный поиск с обработкой ошибок и метриками."""
+		try:
+			if query_vector is None or len(query_vector) == 0:
+				logger.warning("Поиск пропущен: пустой query_vector")
+				return []
+			start = time.time()
+			results = self.client.search(
+				collection_name=self.collection_name,
+				query_vector=query_vector,
+				limit=top_k
+			)
+			elapsed = round(time.time() - start, 3)
+			self._last_search_latency = elapsed   # 🔹 сохраняем задержку
+			VECTOR_SEARCH_LATENCY.labels(collection=self.collection_name).observe(elapsed)
+			VECTOR_SEARCH_TOTAL.labels(collection=self.collection_name).inc()
+			logger.debug(f"🔎 Qdrant search latency: {elapsed}s")
+			return results
+		except Exception as e:
+			logger.error(f"Ошибка поиска: {e}")
+			VECTOR_ERRORS_TOTAL.labels(collection=self.collection_name, operation="search").inc()
+			return {"error": str(e)}
+
+	def search_with_filter(self, query_vector: list[float], filters: dict, top_k: int = 5):
+		"""Поиск с фильтром и централизованной обработкой ошибок."""
+		try:
+			if query_vector is None or len(query_vector) == 0:
+				logger.warning("Поиск с фильтром пропущен: пустой query_vector")
+				return []
+			qdrant_filter = models.Filter(
+				must=[models.FieldCondition(key=k, match=models.MatchValue(value=v)) for k, v in filters.items()]
+			)
+			start = time.time()
+			results = self.client.search(
+				collection_name=self.collection_name,
+				query_vector=query_vector,
+				limit=top_k,
+				query_filter=qdrant_filter
+			)
+			elapsed = round(time.time() - start, 3)
+			self._last_search_latency = elapsed   # 🔹 сохраняем задержку
+			VECTOR_SEARCH_LATENCY.labels(collection=self.collection_name).observe(elapsed)
+			VECTOR_SEARCH_TOTAL.labels(collection=self.collection_name).inc()
+			logger.debug(f"🔎 Qdrant search_with_filter latency: {elapsed}s")
+			return results
+		except Exception as e:
+			logger.error(f"Ошибка поиска с фильтром: {e}")
+			VECTOR_ERRORS_TOTAL.labels(collection=self.collection_name, operation="search_with_filter").inc()
+			return {"error": str(e)}
+
+	def get_last_search_latency(self) -> float | None:
+		"""Вернуть последнюю измеренную задержку поиска (секунды)."""
+		return self._last_search_latency
