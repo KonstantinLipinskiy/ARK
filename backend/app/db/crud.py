@@ -84,7 +84,7 @@ async def get_trades(
 	if symbol:
 		query = query.filter(schemas.TradeORM.symbol == symbol)
 	if status:
-		query = query.filter(schemas.TradeORM.status == status)
+		query = query.filter(schemas.TradeORM.status == schemas.TradeStatus(status) if isinstance(status, str) else status)
 	if user_id:
 		query = query.filter(schemas.TradeORM.user_id == user_id)
 	if signal_id:
@@ -147,9 +147,15 @@ async def update_trade(db: AsyncSession, trade_id: int, updates: dict):
 		if key in allowed_fields:
 			setattr(db_trade, key, value)
 
-	if "status" in updates and updates["status"] == "closed":
-		if db_trade.entry_price and db_trade.exit_price:
-			db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
+	if "status" in updates:
+		new_status = updates["status"]
+		if isinstance(new_status, str):
+			new_status = schemas.TradeStatus(new_status)   # ✅ перевод строки в Enum
+		db_trade.status = new_status
+		if new_status == schemas.TradeStatus.closed:
+			if db_trade.entry_price and db_trade.exit_price:
+				db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
+
 
 	try:
 		await db.commit()
@@ -178,9 +184,15 @@ async def patch_trade(db: AsyncSession, trade_id: int, updates: dict):
 		if key in allowed_fields and value is not None:
 			setattr(db_trade, key, value)
 
-	if "status" in updates and updates["status"] == "closed":
-		if db_trade.entry_price and db_trade.exit_price:
-			db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
+	if "status" in updates:
+		new_status = updates["status"]
+		if isinstance(new_status, str):
+			new_status = schemas.TradeStatus(new_status)   # ✅ перевод строки в Enum
+		db_trade.status = new_status
+		if new_status == schemas.TradeStatus.closed:
+			if db_trade.entry_price and db_trade.exit_price:
+				db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
+
 
 	try:
 		await db.commit()
@@ -243,7 +255,6 @@ async def cancel_trade(db: AsyncSession, trade_id: int, reason: str = "Cancelled
 		await db.rollback()
 		logger.error(f"Ошибка отмены сделки: {e}")
 		raise
-
 
 # ---------- Backtest Reports ----------
 async def create_backtest_report(db: AsyncSession, report_data: dict) -> schemas.BacktestReport:
@@ -423,11 +434,13 @@ async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
 		if "notifications_enabled" not in settings:
 			settings["notifications_enabled"] = True
 
+		role = schemas.UserRole(user.role) if isinstance(user.role, str) else user.role
+
 		db_user = schemas.UserORM(
 			username=user.username,
 			email=user.email,
-			role=user.role,
-			status="active",
+			role=role,
+			status=schemas.UserStatus.active,
 			password_hash=password_hash,
 			salt=salt,
 			telegram_id=user.telegram_id,
@@ -445,7 +458,6 @@ async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
 		await db.rollback()
 		logger.error(f"Ошибка создания пользователя: {e}")
 		raise
-
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> schemas.UserORM | None:
 	"""Получить пользователя по ID."""
@@ -497,7 +509,7 @@ async def update_user_status(db: AsyncSession, user_id: int, status: str) -> sch
 	db_user = result.scalars().first()
 	if not db_user:
 		return None
-	db_user.status = status
+	db_user.status = schemas.UserStatus(status) if isinstance(status, str) else status  # ✅ Приведение к Enum
 	try:
 		await db.commit()
 		await db.refresh(db_user)
@@ -658,6 +670,7 @@ async def count_signals_by_indicator(db: AsyncSession, indicator: str) -> int:
 	)
 	return result.scalar() or 0
 
+
 # ---------- Strategies ----------
 async def get_strategies(db: AsyncSession, skip: int = 0, limit: int = 100):
 	query = select(schemas.StrategyORM)
@@ -781,12 +794,13 @@ async def delete_tokens_by_user(db: AsyncSession, user_id: int) -> bool:
 
 
 # ---------- News ----------
-async def create_news(db: AsyncSession, symbol: str, title: str, source: str, published_at: datetime):
+async def create_news(db: AsyncSession, symbol: str, title: str, content: str, source: str, published_at: datetime):
 	"""Создать новость и сохранить в БД."""
 	try:
 		db_news = schemas.NewsORM(
 			symbol=symbol,
 			title=title,
+			content=content,   # ✅ добавлено
 			source=source,
 			published_at=published_at
 		)
@@ -937,7 +951,6 @@ async def delete_ml_model(db: AsyncSession, model_id: int) -> bool:
 
 
 # ---------- Risk Settings ----------
-
 async def get_risk_settings(db: AsyncSession) -> schemas.RiskSettingsORM | None:
 	"""Получить текущие параметры риска (берём первую запись)."""
 	result = await db.execute(select(schemas.RiskSettingsORM).limit(1))

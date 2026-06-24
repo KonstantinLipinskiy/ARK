@@ -1,5 +1,5 @@
 #app/db/schemas.py
-from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, BigInteger, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, Enum, ForeignKey, func, Boolean, BigInteger, JSON, Text
 from sqlalchemy.orm import relationship
 import enum
 from app.db.base import Base
@@ -303,6 +303,7 @@ class NewsORM(Base):
 	id = Column(Integer, primary_key=True, index=True)
 	symbol = Column(String(20), nullable=False, index=True)   # монета или пара (BTC, ETH, SOL)
 	title = Column(String(255), nullable=False)               # заголовок новости
+	content = Column(Text, nullable=True)   # ✅ новое поле
 	source = Column(String(100), nullable=True)               # источник (NewsData.io, CoinDesk)
 	published_at = Column(DateTime, nullable=False)           # время публикации
 	created_at = Column(DateTime, server_default=func.now())  # время сохранения в БД

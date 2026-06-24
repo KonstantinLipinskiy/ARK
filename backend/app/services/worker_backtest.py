@@ -1,12 +1,13 @@
+#app/services/worker_backtest.py
 import asyncio
 import json
 import pandas as pd
 from app.services.backtest import (
-    backtest_strategy,
-    calculate_metrics,
-    save_trades_to_db,
-    save_metrics_to_db,
-    plot_backtest
+	backtest_strategy,
+	calculate_metrics,
+	save_trades_to_db,
+	save_metrics_to_db,
+	plot_backtest
 )
 from app.services.ml import MLService
 from app.db.session import get_session
