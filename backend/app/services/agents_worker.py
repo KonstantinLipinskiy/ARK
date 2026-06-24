@@ -1,4 +1,3 @@
-# app/workers/agents_worker.py
 import asyncio
 import json
 import time
@@ -35,7 +34,6 @@ class AgentsWorker:
 			AGENT_REQUESTS.inc()
 
 			# Вызов агента — run_agent синхронный, поэтому без await
-			# Если запрос — это генерация отчёта, пробрасываем формат
 			if isinstance(query, dict) and query.get("type") == "report":
 				trades = query.get("trades", [])
 				result = self.agents_service.generate_report(trades, output_format=output_format)
@@ -54,7 +52,9 @@ class AgentsWorker:
 			}
 			await self.broker.publish("queue_telegram", response_payload)
 			await message.ack()
-			logger.info(f"📤 Ответ агента отправлен пользователю {user_id}, формат={output_format}, результат={str(result)[:100]}...")
+			logger.info(
+				f"📤 Ответ агента отправлен пользователю {user_id}, формат={output_format}, результат={str(result)[:100]}..."
+			)
 
 		except Exception as e:
 			AGENT_ERRORS.inc()

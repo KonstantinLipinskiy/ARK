@@ -22,6 +22,10 @@ class UserStatus(enum.Enum):
 	active = "active"
 	blocked = "blocked"
 
+class SignalStatus(enum.Enum):
+	active = "active"
+	inactive = "inactive"
+
 class TradeORM(Base):
 	__tablename__ = "trades"
 
@@ -80,6 +84,8 @@ class SignalORM(Base):
 	source = Column(String(50))
 	timestamp = Column(DateTime, server_default=func.now(), index=True)
 	direction = Column(Enum(SignalDirection), nullable=False)
+
+	status = Column(Enum(SignalStatus), default=SignalStatus.active, nullable=False, index=True)
 
 	obv = Column(Float, nullable=True)
 	stochastic = Column(Float, nullable=True)
@@ -315,3 +321,12 @@ class MLModelORM(Base):
 	# связь с пользователем (если хотим хранить кастомные модели для конкретного юзера)
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="ml_models")
+
+
+class RiskSettingsLogORM(Base):
+	__tablename__ = "risk_settings_log"
+
+	id = Column(Integer, primary_key=True, index=True)
+	updated_by = Column(String(50), nullable=False)          # кто обновил (system / admin / user)
+	updates = Column(String(1000), nullable=False)           # JSON или строка с изменениями
+	timestamp = Column(DateTime, server_default=func.now())  # время обновления

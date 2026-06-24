@@ -1,4 +1,3 @@
-# app/broker/rabbitmq.py
 import asyncio
 import aio_pika
 import time

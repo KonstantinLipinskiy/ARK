@@ -140,6 +140,8 @@ class Settings(BaseSettings):
 
 	PAIRS: list[str] = [p.strip() for p in os.getenv("PAIRS", "BTC/USDT,ETH/USDT").split(",")]
 
+	DEFAULT_LEVERAGE: int = int(os.getenv("DEFAULT_LEVERAGE", 1))
+
 
 settings = Settings()
 

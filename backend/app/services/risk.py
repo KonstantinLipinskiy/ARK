@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from app.db.schemas import RiskLog, TradeORM, UserORM, FundingRateORM
+from app.db.schemas import RiskLog, TradeORM, UserORM, FundingRateORM, TradeStatus, SignalDirection
 from app.utils.logger import logger
 from app.broker.rabbitmq import RabbitMQBroker
 from app.services.exchange import load_strategies, get_funding_rate, get_mark_price
@@ -39,6 +39,7 @@ class RiskService:
 		except Exception as e:
 			logger.error(f"❌ Failed to refresh configs: {e}")
 
+
 	# --- Новый метод для Telegram ---
 	async def get_limits(self, user_id: int | None = None) -> dict:
 		"""
@@ -58,6 +59,7 @@ class RiskService:
 			"strength_multiplier": risk_config.get("strength_multiplier", "-"),
 		}
 
+
 	# --- FUNDING RATE ---
 	async def save_funding_rate(self, symbol: str):
 		"""Получить и сохранить ставку финансирования в БД."""
@@ -73,11 +75,16 @@ class RiskService:
 			)
 			self.db_session.add(record)
 			await self.db_session.commit()
-			logger.info(f"✅ Funding rate saved for {symbol}: {funding['fundingRate']}")
+
+			logger.info(
+				f"✅ Funding rate saved | {symbol} | rate={funding['fundingRate']} | ts={funding['timestamp']}"
+			)
 			return record
+
 		except Exception as e:
 			logger.error(f"❌ Failed to save funding rate for {symbol}: {e}")
 			return {"error": str(e)}
+
 
 	# --- LIQUIDATION RISK ---
 	async def check_liquidation_risk(self, symbol: str, entry_price: float, leverage: int) -> bool:
@@ -89,13 +96,19 @@ class RiskService:
 
 			mark_price = mark["markPrice"]
 			liquidation_threshold = entry_price * (1 - 1 / leverage)
+
 			if mark_price <= liquidation_threshold:
-				logger.warning(f"⚠️ {symbol} близко к ликвидации! Mark={mark_price}, Entry={entry_price}")
+				logger.warning(
+					f"⚠️ {symbol} близко к ликвидации | Mark={mark_price} | Entry={entry_price} | Lev={leverage} | Threshold={liquidation_threshold}"
+				)
 				return True
+
 			return False
+
 		except Exception as e:
 			logger.error(f"❌ Liquidation risk check failed for {symbol}: {e}")
 			return False
+
 
 	async def get_user_risk_config(self, user_id: int) -> dict:
 		"""Возвращает индивидуальные параметры риска пользователя (с кэшированием)."""
@@ -103,13 +116,16 @@ class RiskService:
 			return self._user_risk_cache[user_id]
 
 		try:
-			result = await self.db_session.execute(select(UserORM).filter(UserORM.id == user_id))
+			result = await self.db_session.execute(
+				select(UserORM).filter(UserORM.id == user_id)
+			)
 			user = result.scalars().first()
+
 			if not user or not user.settings:
 				self._user_risk_cache[user_id] = self.RISK_CONFIG
 				return self.RISK_CONFIG
 
-			profile = user.settings.get("risk_profile", None)
+			profile = user.settings.get("risk_profile")
 			custom_config = user.settings.get("custom_risk", {})
 
 			if profile and profile in RISK_PROFILES:
@@ -119,9 +135,11 @@ class RiskService:
 
 			self._user_risk_cache[user_id] = config
 			return config
+
 		except Exception as e:
-			logger.error(f"❌ Failed to load user risk profile: {e}")
+			logger.error(f"❌ Failed to load user risk profile for user_id={user_id}: {e}")
 			return self.RISK_CONFIG
+
 
 	async def _get_pair_performance(self, symbol: str) -> float:
 		"""Возвращает коэффициент производительности пары на основе winrate/прибыльности."""
@@ -134,16 +152,25 @@ class RiskService:
 				).where(TradeORM.symbol == symbol)
 			)
 			total_trades, total_profit, wins = result.first()
+
+			# Если сделок мало — возвращаем нейтральный коэффициент
 			if not total_trades or total_trades < 30:
+				logger.info(f"ℹ️ Недостаточно данных для {symbol}: trades={total_trades}")
 				return 1.0
 
 			winrate = wins / total_trades
 			avg_profit = (total_profit / total_trades) if total_trades else 0
 			performance_factor = max(0.5, min(2.0, winrate * (1 + avg_profit)))
+
+			logger.debug(
+				f"📊 Performance factor calculated | {symbol} | trades={total_trades} | winrate={winrate:.2f} | avg_profit={avg_profit:.4f} | factor={performance_factor:.2f}"
+			)
 			return performance_factor
+
 		except Exception as e:
 			logger.error(f"❌ Failed to calculate performance for {symbol}: {e}")
 			return 1.0
+
 
 	async def calculate_position_size(
 		self,
@@ -170,7 +197,10 @@ class RiskService:
 
 		# --- масштабирование риска ---
 		if risk_config.get("dynamic_allocation", False):
-			multiplier = min(strength * risk_config.get("signal_strength_multiplier", settings.SIGNAL_STRENGTH_MULTIPLIER), 3.0)
+			multiplier = min(
+				strength * risk_config.get("signal_strength_multiplier", settings.SIGNAL_STRENGTH_MULTIPLIER),
+				3.0
+			)
 			if ml_confidence:
 				multiplier *= (1 + ml_confidence)
 			risk_amount *= multiplier
@@ -208,46 +238,71 @@ class RiskService:
 
 		position_size = min(position_size_by_risk, position_size_by_allocation)
 		max_position = (deposit * risk_config.get("max_leverage", 1)) / effective_entry if effective_entry > 0 else 0
+
+		logger.debug(
+			f"📊 Position size calculated | {symbol} | deposit={deposit} | entry={entry_price} | "
+			f"risk_amount={risk_amount:.4f} | allocation={allocation_percent:.4f} | pos={position_size:.4f} | max={max_position:.4f}"
+		)
+
 		return min(position_size, max_position)
 
-	def calculate_leverage(self, symbol: str, strength: float, user_risk_config: dict | None = None) -> int:
+
+	def calculate_leverage(
+		self,
+		symbol: str,
+		strength: float,
+		user_risk_config: dict | None = None
+	) -> int:
 		"""Динамическое управление плечом."""
 		risk_config = user_risk_config or self.RISK_CONFIG
 		base_leverage = self.STRATEGY_CONFIG.get(symbol, {}).get("leverage", 1)
 		max_leverage = risk_config.get("max_leverage", base_leverage)
 
 		if strength < 0.8:
-			return 1
+			leverage = 1
 		elif strength < 1.5:
-			return base_leverage
+			leverage = base_leverage
 		else:
-			return min(base_leverage + 1, max_leverage)
+			leverage = min(base_leverage + 1, max_leverage)
+
+		logger.debug(
+			f"📊 Leverage calculated | {symbol} | strength={strength:.2f} | base={base_leverage} | max={max_leverage} | result={leverage}"
+		)
+		return leverage
+
 
 	def apply_stop_loss(
 		self,
 		entry_price: float,
 		stop_loss_pct: float,
-		direction: str = "long",
+		direction: SignalDirection = SignalDirection.buy,
 		atr: float | None = None,
 		risk_config: dict | None = None
 	) -> float:
 		"""Расчёт стоп-лосса с учётом ATR множителя."""
 		atr_mult = (risk_config or self.RISK_CONFIG).get("atr_multiplier", settings.ATR_MULTIPLIER)
-		if direction == "long":
+
+		if direction == SignalDirection.buy:
 			stop = entry_price * (1 - stop_loss_pct)
 			if atr:
 				stop = min(stop, entry_price - atr_mult * atr)
-		else:
+		else:  # SignalDirection.sell
 			stop = entry_price * (1 + stop_loss_pct)
 			if atr:
 				stop = max(stop, entry_price + atr_mult * atr)
+
+		logger.debug(
+			f"📉 Stop-loss calculated | entry={entry_price} | stop_loss_pct={stop_loss_pct} | "
+			f"direction={direction.value} | atr={atr} | result={stop:.4f}"
+		)
 		return stop
+
 
 	def apply_take_profit(
 		self,
 		entry_price: float,
 		targets: list[float],
-		direction: str = "long",
+		direction: SignalDirection = SignalDirection.buy,
 		risk_config: dict | None = None
 	) -> list[float]:
 		"""Расчёт тейк-профитов с учётом комиссии и проскальзывания."""
@@ -255,30 +310,80 @@ class RiskService:
 		slippage = (risk_config or self.RISK_CONFIG).get("slippage_tolerance", settings.SLIPPAGE_TOLERANCE)
 		effective_entry = entry_price * (1 + commission + slippage)
 
-		if direction == "long":
-			return [effective_entry * (1 + tp) for tp in targets]
-		else:
-			return [effective_entry * (1 - tp) for tp in targets]
+		if direction == SignalDirection.buy:
+			take_profits = [effective_entry * (1 + tp) for tp in targets]
+		else:  # SignalDirection.sell
+			take_profits = [effective_entry * (1 - tp) for tp in targets]
 
-	def apply_trailing_stop(self, current_price: float, stop_price: float, trailing_pct: float, direction: str = "long") -> float:
-		if direction == "long":
+		logger.debug(
+			f"🎯 Take-profits calculated | entry={entry_price} | effective_entry={effective_entry:.4f} | "
+			f"direction={direction.value} | targets={targets} | result={take_profits}"
+		)
+		return take_profits
+
+
+	def apply_trailing_stop(
+		self,
+		current_price: float,
+		stop_price: float,
+		trailing_pct: float,
+		direction: SignalDirection = SignalDirection.buy
+	) -> float:
+		"""Расчёт трейлинг-стопа для long/short позиции."""
+		if direction == SignalDirection.buy:
 			new_stop = current_price * (1 - trailing_pct)
-			return max(stop_price, new_stop)
-		else:
+			result = max(stop_price, new_stop)
+		else:  # SignalDirection.sell
 			new_stop = current_price * (1 + trailing_pct)
-			return min(stop_price, new_stop)
+			result = min(stop_price, new_stop)
+
+		logger.debug(
+			f"🔄 Trailing stop updated | current={current_price} | stop={stop_price} | "
+			f"trailing_pct={trailing_pct} | direction={direction.value} | new_stop={result:.4f}"
+		)
+		return result
+
 
 	def check_daily_loss(self, total_loss_pct: float, risk_config: dict) -> bool:
-		return total_loss_pct <= risk_config.get("max_daily_loss", 0.05)
+		"""Проверка дневного лимита убытков."""
+		max_daily_loss = risk_config.get("max_daily_loss", 0.05)
+		result = total_loss_pct <= max_daily_loss
+
+		logger.debug(
+			f"📉 Daily loss check | total_loss_pct={total_loss_pct:.4f} | max_daily_loss={max_daily_loss:.4f} | allowed={result}"
+		)
+		return result
+
 
 	def check_open_trades(self, open_trades: int, risk_config: dict) -> bool:
-		return open_trades < risk_config.get("max_open_trades", 5)
+		"""Проверка лимита количества одновременно открытых сделок."""
+		max_trades = risk_config.get("max_open_trades", 5)
+		result = open_trades < max_trades
+
+		logger.debug(
+			f"📊 Open trades check | open_trades={open_trades} | max_trades={max_trades} | allowed={result}"
+		)
+		return result
+
 
 	def check_cooldown(self, risk_config: dict) -> bool:
+		"""Проверка паузы между сделками (cooldown)."""
 		cooldown = risk_config.get("cooldown_between_trades", 0)
+
 		if not self.last_trade_time:
+			logger.debug(
+				f"⏱️ Cooldown check | no previous trade | cooldown={cooldown}s | allowed=True"
+			)
 			return True
-		return datetime.utcnow() - self.last_trade_time >= timedelta(seconds=cooldown)
+
+		elapsed = datetime.utcnow() - self.last_trade_time
+		result = elapsed >= timedelta(seconds=cooldown)
+
+		logger.debug(
+			f"⏱️ Cooldown check | elapsed={elapsed.total_seconds():.2f}s | cooldown={cooldown}s | allowed={result}"
+		)
+		return result
+
 
 	async def _log_violation(
 		self,
@@ -303,8 +408,8 @@ class RiskService:
 			await self.db_session.commit()
 
 			logger.warning(
-				f"⚠️ Risk violation: {reason} | {symbol} | pos={position_size:.4f} | dep={deposit} "
-				f"| sentiment={sentiment} | pnl={profit_loss} | expected_pnl={expected_pnl}",
+				f"⚠️ Risk violation | reason={reason} | symbol={symbol} | pos={position_size:.4f} | "
+				f"dep={deposit} | sentiment={sentiment} | pnl={profit_loss} | expected_pnl={expected_pnl}",
 				extra={
 					"reason": reason,
 					"symbol": symbol,
@@ -312,17 +417,18 @@ class RiskService:
 					"deposit": deposit,
 					"sentiment": sentiment,
 					"profit_loss": profit_loss,
-					"expected_pnl": expected_pnl
+					"expected_pnl": expected_pnl,
+					"timestamp": datetime.utcnow().isoformat()
 				}
 			)
 		except Exception as e:
-			logger.error(f"❌ Failed to log violation: {e}")
+			logger.error(f"❌ Failed to log violation | reason={reason} | symbol={symbol} | error={e}")
 
 
-	async def _safe_publish(self, message: dict):
+	async def _safe_publish(self, message: dict) -> bool:
 		"""
 		Безопасная публикация сообщения в брокер с retry‑механизмом.
-		Параметры retries и base_delay берутся из settings.py
+		Параметры retries и base_delay берутся из settings.py.
 		"""
 		retries = settings.BROKER_RETRIES
 		base_delay = settings.BROKER_BASE_DELAY
@@ -331,20 +437,26 @@ class RiskService:
 			try:
 				await self.broker.publish_telegram(message)
 				logger.info(
-					"Broker publish succeeded",
-					extra={"message_type": message.get("type"), "attempt": attempt + 1}
+					"✅ Broker publish succeeded",
+					extra={
+						"message_type": message.get("type"),
+						"attempt": attempt + 1,
+						"user_id": message.get("user_id")
+					}
 				)
 				return True
 			except Exception as e:
 				if attempt < retries:
 					delay = base_delay * (2 ** attempt)  # экспоненциальная задержка: 1s → 2s → 4s
 					logger.error(
-						f"Broker publish failed (attempt {attempt+1}/{retries}): {e} | retry in {delay}s"
+						f"Broker publish failed (attempt {attempt+1}/{retries}) | "
+						f"type={message.get('type')} | error={e} | retry in {delay}s"
 					)
 					await asyncio.sleep(delay)
 				else:
 					logger.critical(
-						f"Broker publish retry failed after {retries+1} attempts: {e}"
+						f"Broker publish retry failed after {retries+1} attempts | "
+						f"type={message.get('type')} | error={e}"
 					)
 					return False
 
@@ -420,49 +532,38 @@ class RiskService:
 
 			# RSI thresholds
 			last_rsi = strategy.get("last_rsi")
-			rsi_lower = strategy.get("rsi_lower_threshold", 30)
-			rsi_upper = strategy.get("rsi_upper_threshold", 70)
 			if last_rsi is not None:
-				if last_rsi < rsi_lower:
+				if last_rsi < strategy.get("rsi_lower_threshold", 30):
 					direction = "long"
-				elif last_rsi > rsi_upper:
+				elif last_rsi > strategy.get("rsi_upper_threshold", 70):
 					direction = "short"
 
 			# Stochastic thresholds
 			last_stoch = strategy.get("last_stoch")
-			stoch_lower = strategy.get("stochastic_lower_threshold", 20)
-			stoch_upper = strategy.get("stochastic_upper_threshold", 80)
 			if last_stoch is not None:
-				if last_stoch < stoch_lower:
+				if last_stoch < strategy.get("stochastic_lower_threshold", 20):
 					direction = "long"
-				elif last_stoch > stoch_upper:
+				elif last_stoch > strategy.get("stochastic_upper_threshold", 80):
 					direction = "short"
 
 			# Sentiment thresholds
 			last_sentiment = strategy.get("last_sentiment")
-			sentiment_long = strategy.get("sentiment_long_threshold", -0.5)
-			sentiment_short = strategy.get("sentiment_short_threshold", 0.5)
-			if direction == "long" and last_sentiment is not None and last_sentiment < sentiment_long:
+			if direction == "long" and last_sentiment is not None and last_sentiment < strategy.get("sentiment_long_threshold", -0.5):
 				await self._log_violation("Sentiment blocks long entry", symbol, position_size, deposit, sentiment=last_sentiment, expected_pnl=None)
 				return False
-			if direction == "short" and last_sentiment is not None and last_sentiment > sentiment_short:
+			if direction == "short" and last_sentiment is not None and last_sentiment > strategy.get("sentiment_short_threshold", 0.5):
 				await self._log_violation("Sentiment blocks short entry", symbol, position_size, deposit, sentiment=last_sentiment, expected_pnl=None)
 				return False
 
 			# --- Проверка Risk/Reward ---
 			rr_ratio = risk_config.get("risk_reward_ratio", 1.5)
 			potential_loss = entry_price * stop_loss_pct
-
 			tp_targets = strategy.get("take_profit_targets", [0.03])
-			tp_distribution = strategy.get(
-				"take_profit_distribution",
-				[1 / len(tp_targets)] * len(tp_targets)
-			)
+			tp_distribution = strategy.get("take_profit_distribution", [1 / len(tp_targets)] * len(tp_targets))
 
 			weighted_tp = sum(tp * w for tp, w in zip(tp_targets, tp_distribution))
 			potential_profit = entry_price * weighted_tp
-
-			expected_pnl = potential_profit - potential_loss  # ✅ расчёт
+			expected_pnl = potential_profit - potential_loss
 
 			if potential_profit / potential_loss < rr_ratio:
 				await self._log_violation("Risk/Reward ratio too low", symbol, position_size, deposit, sentiment=last_sentiment, expected_pnl=expected_pnl)
@@ -511,9 +612,8 @@ class RiskService:
 			})
 
 			# --- Отправка метрик в Prometheus/Grafana ---
-			logger.info("Metrics collected", extra={"metric": "sharpe", "value": strategy.get("sharpe", 0), "symbol": symbol})
-			logger.info("Metrics collected", extra={"metric": "winrate", "value": strategy.get("winrate", 0), "symbol": symbol})
-			logger.info("Metrics collected", extra={"metric": "drawdown", "value": strategy.get("max_drawdown", 0), "symbol": symbol})
+			for metric in ["sharpe", "winrate", "max_drawdown"]:
+				logger.info("Metrics collected", extra={"metric": metric, "value": strategy.get(metric, 0), "symbol": symbol})
 			logger.info("Metrics collected", extra={"metric": "expected_pnl", "value": expected_pnl, "symbol": symbol})
 
 			return True

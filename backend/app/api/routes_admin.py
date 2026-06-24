@@ -1,11 +1,18 @@
-# app/api/routes_admin.py
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 from app.db.session import get_db
-from app.db.schemas import UserORM, TradeORM, SignalORM, StrategyORM
+from app.db.schemas import (
+	UserORM,
+	TradeORM,
+	SignalORM,
+	StrategyORM,
+	UserStatus,
+	TradeStatus,
+	SignalStatus,
+)
 from app.services.exchange import load_strategies
 from app.services.strategy_service import add_strategy, update_strategy, delete_strategy, toggle_strategy
 from app.services.risk_service import load_risk_settings, update_risk_settings
@@ -23,13 +30,19 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM = Depends(get_current_admin)):
 	try:
 		total_trades = await db.scalar(select(func.count()).select_from(TradeORM))
-		active_signals = await db.scalar(select(func.count()).select_from(SignalORM).filter(SignalORM.status == "active"))
+		active_signals = await db.scalar(
+			select(func.count()).select_from(SignalORM).filter(SignalORM.status == SignalStatus.active)
+		)
 		users = await db.scalar(select(func.count()).select_from(UserORM))
 
 		wins = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.profit_loss > 0))
 		avg_profit = await db.scalar(select(func.avg(TradeORM.profit_loss)))
-		active_positions = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "open"))
-		cancelled_trades = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.status == "cancelled"))
+		active_positions = await db.scalar(
+			select(func.count()).select_from(TradeORM).filter(TradeORM.status == TradeStatus.open)
+		)
+		cancelled_trades = await db.scalar(
+			select(func.count()).select_from(TradeORM).filter(TradeORM.status == TradeStatus.cancelled)
+		)
 
 		result = await db.execute(select(TradeORM))
 		trades = result.scalars().all()
@@ -61,7 +74,7 @@ async def block_user(user_id: int, db: AsyncSession = Depends(get_db), current_a
 	if not user:
 		raise HTTPException(status_code=404, detail="User not found")
 
-	user.status = "blocked"
+	user.status = UserStatus.blocked
 	try:
 		await db.commit()
 		await telegram_service.send_user_blocked(user)

@@ -1,11 +1,10 @@
-# app/monitoring/prometheus.py
 from fastapi import APIRouter, Response, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
 from prometheus_client import Gauge, Counter, Histogram, Summary, generate_latest
 from app.db.session import get_db
-from app.db.schemas import TradeORM, SignalORM, TradeStatus
+from app.db.schemas import TradeORM, SignalORM, TradeStatus, SignalStatus, SignalDirection
 from app.utils.metrics import (
 	calculate_metrics,
 	calculate_metrics_by_user,
@@ -127,7 +126,7 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 
 	# Количество активных сигналов
 	active_signals = await db.scalar(
-		select(func.count()).select_from(SignalORM).filter(SignalORM.status == "active")
+		select(func.count()).select_from(SignalORM).filter(SignalORM.status == SignalStatus.active)
 	)
 	active_signals_gauge.set(active_signals or 0)
 
@@ -141,12 +140,12 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 	signals_filtered_total.set(weak_signals or 0)
 
 	buy_signals = await db.scalar(
-		select(func.count()).select_from(SignalORM).filter(SignalORM.direction == "buy")
+		select(func.count()).select_from(SignalORM).filter(SignalORM.direction == SignalDirection.buy)
 	)
 	signals_buy_total.set(buy_signals or 0)
 
 	sell_signals = await db.scalar(
-		select(func.count()).select_from(SignalORM).filter(SignalORM.direction == "sell")
+		select(func.count()).select_from(SignalORM).filter(SignalORM.direction == SignalDirection.sell)
 	)
 	signals_sell_total.set(sell_signals or 0)
 
@@ -156,7 +155,7 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 		recent_trades_gauge.labels(
 			trade_id=str(trade.id),
 			symbol=trade.symbol,
-			profit_loss=str(trade.profit_loss),
+			profit_loss=trade.profit_loss if trade.profit_loss is not None else 0,
 			status=trade.status.value if isinstance(trade.status, TradeStatus) else str(trade.status),
 			user_id=str(trade.user_id),
 		).set(trade.profit_loss or 0)
@@ -167,7 +166,7 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 		metrics = broker.get_metrics()
 		rabbitmq_messages_published.set(metrics["messages_published"])
 		rabbitmq_messages_consumed.set(metrics["messages_consumed"])
-		rabbitmq_errors_total.inc(metrics["errors_total"])   # ✅ заменили цикл на .inc(value)
+		rabbitmq_errors_total.inc(metrics["errors_total"])
 		rabbitmq_processing_time_avg.observe(metrics["avg_processing_time"])
 		rabbitmq_processing_time_max.observe(metrics["max_processing_time"])
 	except Exception:
@@ -178,15 +177,14 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 	try:
 		metrics = redis.get_metrics()
 		redis_keys_total.set(metrics["keys_total"])
-		redis_errors_total.inc(metrics["errors_total"])      # ✅ заменили цикл на .inc(value)
+		redis_errors_total.inc(metrics["errors_total"])
 		redis_latency_seconds.observe(metrics["avg_latency"])
 		redis_latency_summary.observe(metrics["last_latency"])
 	except Exception:
 		redis_keys_total.set(0)
 		redis_errors_total.inc()
 
-
-		# --- Метрики индикаторов ---
+	# --- Метрики индикаторов ---
 	try:
 		indicator_keys = await redis.keys("indicator:*:status")
 		indicators_tasks_total.set(len(indicator_keys))
@@ -217,7 +215,10 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 		ml_cv_loss_gauge.set(ml_cv_loss())
 		ml_training_runs_total.inc()
 		ml_predictions_total.inc()
-		ml_prediction_confidence.observe(0.85)  # пример: confidence модели
+		# 🔹 Используем реальное значение confidence модели
+		confidence_value = ml_prediction_confidence()
+		if confidence_value is not None:
+			ml_prediction_confidence.observe(confidence_value)
 	except Exception:
 		pass
 
@@ -233,4 +234,3 @@ def log_error():
 	rabbitmq_errors_total.inc()
 	indicators_tasks_errors.inc()
 	VECTOR_ERRORS_TOTAL.labels(collection="arkbot_vectors", operation="general").inc()
-

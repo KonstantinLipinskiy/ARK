@@ -29,6 +29,10 @@ async def load_risk_settings(db: AsyncSession, use_cache: bool = True) -> dict:
 			"cooldown_between_trades": 60,
 			"risk_reward_ratio": 1.5,
 			"dynamic_allocation": False,
+			"commission_rate": 0.001,
+			"slippage_tolerance": 0.0005,
+			"signal_strength_multiplier": 2.0,
+			"atr_multiplier": 2.0,
 		}
 		return _risk_cache
 
@@ -40,6 +44,10 @@ async def load_risk_settings(db: AsyncSession, use_cache: bool = True) -> dict:
 		"cooldown_between_trades": risk_settings.cooldown_between_trades,
 		"risk_reward_ratio": risk_settings.risk_reward_ratio,
 		"dynamic_allocation": risk_settings.dynamic_allocation,
+		"commission_rate": risk_settings.commission_rate,
+		"slippage_tolerance": risk_settings.slippage_tolerance,
+		"signal_strength_multiplier": risk_settings.signal_strength_multiplier,
+		"atr_multiplier": risk_settings.atr_multiplier,
 	}
 	return _risk_cache
 
@@ -87,18 +95,25 @@ async def calculate_position_size(symbol: str, deposit: float, entry_price: floa
 									stop_loss_pct: float, strength: float, ml_confidence: float) -> float:
 	"""
 	Рассчитать размер позиции на основе депозита, стоп-лосса, силы сигнала и confidence.
+	Учитываются комиссия, проскальзывание и множители.
 	"""
 	risk_settings = _risk_cache or {}
 	max_risk_per_trade = risk_settings.get("max_risk_per_trade", 0.01)
+	commission_rate = risk_settings.get("commission_rate", 0.001)
+	slippage_tolerance = risk_settings.get("slippage_tolerance", 0.0005)
+	signal_strength_multiplier = risk_settings.get("signal_strength_multiplier", 1.0)
 
 	# Потенциальный риск = депозит * max_risk_per_trade
 	risk_capital = deposit * max_risk_per_trade
 
+	# Учёт комиссии и проскальзывания
+	effective_entry_price = entry_price * (1 + commission_rate + slippage_tolerance)
+
 	# Размер позиции = риск / (entry_price * stop_loss_pct)
-	position_size = risk_capital / (entry_price * stop_loss_pct)
+	position_size = risk_capital / (effective_entry_price * stop_loss_pct)
 
 	# Корректировка по силе сигнала и confidence
-	adjusted_size = position_size * (settings.AMOUNT_FACTOR + ml_confidence) * strength
+	adjusted_size = position_size * (settings.AMOUNT_FACTOR + ml_confidence) * strength * signal_strength_multiplier
 
 	return max(adjusted_size, 0.0)
 
@@ -112,6 +127,7 @@ async def validate_trade(symbol: str, deposit: float, entry_price: float,
 	risk_settings = _risk_cache or {}
 	max_open_trades = risk_settings.get("max_open_trades", 5)
 	max_daily_loss = risk_settings.get("max_daily_loss", 0.05)
+	risk_reward_ratio = risk_settings.get("risk_reward_ratio", 1.5)
 
 	# Проверка количества открытых сделок
 	if open_trades >= max_open_trades:
@@ -126,6 +142,11 @@ async def validate_trade(symbol: str, deposit: float, entry_price: float,
 	# Проверка силы сигнала
 	if strength < settings.CONFIDENCE_THRESHOLD:
 		logger.warning(f"⚠️ Сигнал отклонён: strength={strength:.2f} < threshold={settings.CONFIDENCE_THRESHOLD}")
+		return False
+
+	# Проверка соотношения риск/прибыль
+	if risk_reward_ratio < 1.0:
+		logger.warning(f"⚠️ Недопустимое соотношение риск/прибыль ({risk_reward_ratio})")
 		return False
 
 	return True

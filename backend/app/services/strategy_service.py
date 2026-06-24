@@ -95,12 +95,13 @@ async def toggle_strategy(db: AsyncSession, symbol: str, enabled: bool):
 # --- Валидация ---
 def validate_strategy(strategy: dict) -> bool:
 	"""Проверить корректность стратегии"""
-	required_fields = ["stop_loss", "take_profit_targets", "leverage"]
+	required_fields = ["stop_loss", "take_profit_targets", "leverage", "allocation_percent", "enabled_indicators"]
 	for field in required_fields:
 		if strategy.get(field) is None:
 			logger.error(f"❌ Стратегия некорректна: отсутствует {field}")
 			return False
 	return True
+
 
 # --- Дополнительно: доступ к рынку ---
 async def get_strategy_market_data(symbol: str) -> dict:

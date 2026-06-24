@@ -1,13 +1,12 @@
-#app/services/worker_backtest.py
 import asyncio
 import json
 import pandas as pd
 from app.services.backtest import (
-	backtest_strategy,
-	calculate_metrics,
-	save_trades_to_db,
-	save_metrics_to_db,
-	plot_backtest
+    backtest_strategy,
+    calculate_metrics,
+    save_trades_to_db,
+    save_metrics_to_db,
+    plot_backtest
 )
 from app.services.ml import MLService
 from app.db.session import get_session
@@ -15,6 +14,7 @@ from app.broker.rabbitmq import RabbitMQBroker
 from app.utils.logger import logger
 from app.db import crud
 from app.config import settings
+
 
 ml_service = MLService()
 ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
@@ -46,6 +46,7 @@ class BacktestWorker:
 							results = await backtest_strategy(df, pair, strategy)
 							metrics = calculate_metrics(results)
 
+							# 🔹 сохраняем сделки и метрики с Enum‑значениями
 							await save_trades_to_db(results, pair, strategy_name=strategy_name, session=session)
 							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name, session=session)
 

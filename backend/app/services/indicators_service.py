@@ -1,3 +1,4 @@
+#app/services/indicators_service.py
 import asyncio
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession

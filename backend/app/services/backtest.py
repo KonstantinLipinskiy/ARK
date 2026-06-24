@@ -1,4 +1,3 @@
-#app/services/backtest.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,6 +17,7 @@ from app.broker.rabbitmq import RabbitMQBroker
 from app.db import crud
 from app.models.trade import Trade
 from scripts.fetch_data import update_csv, PAIRS
+from app.db.schemas import TradeStatus, SignalDirection  # 🔹 добавлен импорт Enum
 
 ml_service = MLService()
 ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
@@ -116,9 +116,9 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 				for ind in condition:
 					if ind == "EMA":
 						if row["ema_short"] > row["ema_long"]:
-							signals.append(True); direction = "long"
+							signals.append(True); direction = SignalDirection.buy
 						elif row["ema_short"] < row["ema_long"] and market_type == "futures":
-							signals.append(True); direction = "short"
+							signals.append(True); direction = SignalDirection.sell
 						else:
 							signals.append(False)
 
@@ -126,25 +126,25 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 						rsi_lower = strategy.get("rsi_lower_threshold", 30)
 						rsi_upper = strategy.get("rsi_upper_threshold", 70)
 						if row["rsi"] < rsi_lower:
-							signals.append(True); direction = "long"
+							signals.append(True); direction = SignalDirection.buy
 						elif row["rsi"] > rsi_upper and market_type == "futures":
-							signals.append(True); direction = "short"
+							signals.append(True); direction = SignalDirection.sell
 						else:
 							signals.append(False)
 
 					elif ind == "MACD":
 						if row["macd_line"] > row["macd_signal"]:
-							signals.append(True); direction = "long"
+							signals.append(True); direction = SignalDirection.buy
 						elif row["macd_line"] < row["macd_signal"] and market_type == "futures":
-							signals.append(True); direction = "short"
+							signals.append(True); direction = SignalDirection.sell
 						else:
 							signals.append(False)
 
 					elif ind == "Bollinger":
 						if row["close"] <= row["boll_lower"]:
-							signals.append(True); direction = "long"
+							signals.append(True); direction = SignalDirection.buy
 						elif row["close"] >= row["boll_upper"] and market_type == "futures":
-							signals.append(True); direction = "short"
+							signals.append(True); direction = SignalDirection.sell
 						else:
 							signals.append(False)
 
@@ -152,24 +152,24 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 						stoch_lower = strategy.get("stochastic_lower_threshold", 20)
 						stoch_upper = strategy.get("stochastic_upper_threshold", 80)
 						if row["stoch_k"] < stoch_lower and row["stoch_k"] > row["stoch_d"]:
-							signals.append(True); direction = "long"
+							signals.append(True); direction = SignalDirection.buy
 						elif row["stoch_k"] > stoch_upper and row["stoch_k"] < row["stoch_d"] and market_type == "futures":
-							signals.append(True); direction = "short"
+							signals.append(True); direction = SignalDirection.sell
 						else:
 							signals.append(False)
 
 				# --- Фильтр по sentiment ---
 				sentiment_long = strategy.get("sentiment_long_threshold", -0.5)
 				sentiment_short = strategy.get("sentiment_short_threshold", 0.5)
-				if row.get("news_sentiment", 0) < sentiment_long and direction == "long":
+				if row.get("news_sentiment", 0) < sentiment_long and direction == SignalDirection.buy:
 					signals.append(False)
-				if row.get("news_sentiment", 0) > sentiment_short and direction == "short":
+				if row.get("news_sentiment", 0) > sentiment_short and direction == SignalDirection.sell:
 					signals.append(False)
 
 				if all(signals):
 					entry_price = row["close"]
-					stop_price = risk.apply_stop_loss(entry_price, strategy["stop_loss"], direction)
-					tp_levels = risk.apply_take_profit(entry_price, strategy["take_profit_targets"], direction)
+					stop_price = risk.apply_stop_loss(entry_price, strategy["stop_loss"], direction.value)
+					tp_levels = risk.apply_take_profit(entry_price, strategy["take_profit_targets"], direction.value)
 
 					features = build_features(row)
 					probability = ml_service.predict_signal(features)
@@ -191,7 +191,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 						"entry_index": row.name,
 						"stop": stop_price,
 						"tp": tp_levels,
-						"status": "open",
+						"status": TradeStatus.open,
 						"side": direction,
 						"amount": amount,
 						"leverage": leverage,
@@ -199,17 +199,17 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 					}
 
 					logger.info(
-						f"📈 Trade opened | {pair} | side={direction} | entry={entry_price} | stop={stop_price} | tp={tp_levels} "
+						f"📈 Trade opened | {pair} | side={direction.value} | entry={entry_price} | stop={stop_price} | tp={tp_levels} "
 						f"| amount={amount:.4f} | lev={leverage} | sentiment={row.get('news_sentiment', 0)}",
 						extra=position
-						)
+					)
 
 					try:
 						await broker.publish_telegram({
 							"type": "trade",
 							"trade": {
 								"pair": pair,
-								"side": direction,
+								"side": direction.value,
 								"entry": entry_price,
 								"stop_loss": stop_price,
 								"take_profit": tp_levels,
@@ -223,13 +223,13 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 
 		elif position is not None:
 			price = row["close"]
-			if position["side"] == "long":
+			if position["side"] == SignalDirection.buy:
 				if price <= position["stop"]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "stopped"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
 					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
 					logger.info(
 						f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
-						f"| status=stopped | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						f"| status=cancelled | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
 						extra=position
 					)
 					trades.append(position); position = None
@@ -237,7 +237,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] - strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price <= dynamic_stop:
-						position["exit"] = price; position["exit_index"] = row.name;position["status"] = "atr_stop"
+						position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
 						pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
 						logger.info(
 							f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
@@ -246,7 +246,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 						)
 						trades.append(position); position = None
 				elif price >= position["tp"][0]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "take_profit"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.closed
 					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
 					logger.info(
 						f"✅ Trade take_profit | {pair} | side=long | entry={position['entry']} | exit={price} "
@@ -257,13 +257,13 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 					position["tp"].pop(0)
 					if len(position["tp"]) == 0: position = None
 
-			elif position["side"] == "short":
+			elif position["side"] == SignalDirection.sell:
 				if price >= position["stop"]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "stopped"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
 					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
 					logger.info(
 						f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
-						f"| status=stopped | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						f"| status=cancelled | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
 						extra=position
 					)
 					trades.append(position); position = None
@@ -271,7 +271,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 					atr_value = row["atr"]
 					dynamic_stop = position["entry"] + strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price >= dynamic_stop:
-						position["exit"] = price; position["exit_index"] = row.name; position["status"] = "atr_stop"
+						position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
 						pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
 						logger.info(
 							f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
@@ -280,7 +280,7 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 						)
 						trades.append(position); position = None
 				elif price <= position["tp"][0]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = "take_profit"
+					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.closed
 					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
 					logger.info(
 						f"✅ Trade take_profit | {pair} | side=short | entry={position['entry']} | exit={price} "
@@ -291,6 +291,12 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 					position["tp"].pop(0)
 					if len(position["tp"]) == 0: position = None
 	return trades
+
+
+
+
+
+
 
 
 # --- Метрики ---

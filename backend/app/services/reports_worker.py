@@ -1,4 +1,3 @@
-# app/workers/reports_worker.py
 import asyncio
 import json
 import time
@@ -54,8 +53,7 @@ class ReportsWorker:
 
 			# Метрики времени ответа
 			duration = time.time() - start_time
-			self.reports_service.total_time += duration
-			REPORT_AVG_RESPONSE_TIME.set(self.reports_service.total_time / self.reports_service.requests_count)
+			REPORT_AVG_RESPONSE_TIME.set(duration)
 
 			# Публикация результата в очередь Telegram
 			response_payload = {

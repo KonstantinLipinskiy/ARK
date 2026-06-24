@@ -1,9 +1,8 @@
-# app/workers/telegram_worker.py
+#app/services/telegram_worker.py
 import os
 import asyncio
 import json
 from aiogram import Bot
-from dotenv import load_dotenv
 from sqlalchemy import select
 
 from app.utils.logger import logger
@@ -13,7 +12,6 @@ from app.db.schemas import UserORM
 from app.services.reports import ReportsService
 from app.config import settings
 
-
 bot = Bot(token=settings.TELEGRAM_TOKEN)
 broker = RabbitMQBroker()
 reports_service = ReportsService()
@@ -22,10 +20,9 @@ async def get_user_by_id(user_id: int) -> UserORM | None:
 	"""Получить пользователя по его ID из БД."""
 	async with get_session() as session:
 		result = await session.execute(
-			select(UserORM).where(UserORM.id == user_id)  # ✅ заменено на .where()
+			select(UserORM).where(UserORM.id == user_id)
 		)
 		return result.scalars().first()
-
 
 async def process_notification(message: str):
 	"""

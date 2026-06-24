@@ -1,10 +1,9 @@
-# app/api/routes_auth.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timedelta
 from app.db.session import get_db
-from app.db.schemas import UserORM
+from app.db.schemas import UserORM, UserStatus, UserRole
 from app.models.user import UserCreate, UserLogin, UserOut
 from app.utils.security import (
 	hash_password,
@@ -39,8 +38,8 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 	new_user = UserORM(
 		username=user.username,
 		email=user.email,
-		role=user.role,
-		status="active",
+		role=UserRole(user.role) if isinstance(user.role, str) else user.role,
+		status=UserStatus.active,
 		password_hash=password_hash,
 		salt=salt,
 		telegram_id=user.telegram_id,
@@ -61,16 +60,16 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
 		log_order_error("login", Exception(f"Неверные данные для {credentials.email}"))
 		raise HTTPException(status_code=401, detail="Invalid credentials")
 
-	if user.status != "active":
+	if user.status != UserStatus.active:
 		log_risk_violation(user.email, "Попытка входа заблокированного пользователя")
 		raise HTTPException(status_code=403, detail="User is blocked")
 
 	access_token = create_access_token(
-		{"user_id": user.id, "role": user.role},
+		{"user_id": user.id, "role": user.role.value},
 		expires_minutes=ACCESS_TOKEN_EXPIRE_MINUTES
 	)
 	refresh_token = create_refresh_token(
-		{"user_id": user.id, "role": user.role},
+		{"user_id": user.id, "role": user.role.value},
 		expires_days=REFRESH_TOKEN_EXPIRE_DAYS
 	)
 

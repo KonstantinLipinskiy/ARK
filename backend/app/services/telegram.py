@@ -1,9 +1,10 @@
+#app/services/telegram.py
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.utils.logger import logger
-from app.db.schemas import TradeORM, UserORM
+from app.db.schemas import TradeORM, UserORM, UserStatus
 from app.broker.rabbitmq import RabbitMQBroker
 from app.utils.metrics import calculate_metrics
 from app.config import Settings
@@ -157,7 +158,7 @@ async def get_user_by_chat_id(chat_id: int) -> UserORM | None:
 
 async def is_authorized(message: types.Message) -> bool:
 	user = await get_user_by_chat_id(message.chat.id)
-	if not user or user.status != "active":
+	if not user or user.status != UserStatus.active:   # ✅ Enum вместо строки
 		logger.warning(f"Попытка доступа от неавторизованного chat_id: {message.chat.id}")
 		return False
 	return True
@@ -187,7 +188,7 @@ async def status_command(message: types.Message):
 		if trades:
 			msg = "\n".join([
 				f"{t.symbol} {t.side} {t.amount} @ {t.price} "
-				f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk})"
+				f"({t.status}, Lev={t.leverage}, Conf={t.confidence_score}, SL={t.stop_loss}, Risk={t.risk_reason})"
 				for t in trades
 			])
 			await message.answer(f"📊 Последние сделки:\n{msg}")

@@ -5,7 +5,7 @@ from app.config import settings
 from app.utils.logger import logger
 from app.services.risk_service import calculate_position_size, validate_trade
 from app.broker.rabbitmq import RabbitMQBroker
-from app.db.schemas import TradeORM
+from app.db.schemas import TradeORM, TradeStatus
 from app.services.ml import MLService
 from app.services.exchange import get_ohlcv, get_exchange 
 
@@ -112,9 +112,9 @@ async def create_order(symbol: str, side: str, amount: float = None,
 			price=price or 0.0,
 			entry_price=price or 0.0,
 			stop_loss=stop_price,
-			leverage=settings.DEFAULT_DEPOSIT,
+			leverage=settings.DEFAULT_LEVERAGE,
 			confidence_score=confidence_score,
-			status="open"
+			status=TradeStatus.open
 		)
 		db_session.add(trade)
 		await db_session.commit()
@@ -192,7 +192,7 @@ async def create_stop_order(symbol: str, side: str, amount: float = None,
 			price=stop_price or 0.0,
 			stop_loss=stop_price,
 			confidence_score=confidence_score,
-			status="open"
+			status=TradeStatus.open
 		)
 		db_session.add(trade)
 		await db_session.commit()
@@ -274,7 +274,7 @@ async def create_oco_order(symbol: str, side: str, amount: float = None,
 			stop_loss=stop_price,
 			take_profit=price,
 			confidence_score=confidence_score,
-			status="open"
+			status=TradeStatus.open
 		)
 		db_session.add(trade)
 		await db_session.commit()

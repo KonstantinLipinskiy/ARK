@@ -1,3 +1,4 @@
+#app/services/exchange.py
 import ccxt.async_support as ccxt
 from sqlalchemy import select
 import asyncio
@@ -9,7 +10,7 @@ from app.config import settings
 from app.utils.logger import logger
 from app.services.risk import RiskService
 from app.services.telegram import TelegramService
-from app.db.schemas import TradeORM, StrategyORM, OHLCVHourly
+from app.db.schemas import TradeORM, StrategyORM, OHLCVHourly, TradeStatus
 
 # --- INIT ---
 def get_exchange():
@@ -144,7 +145,7 @@ async def create_order(
 					side=side,
 					amount=amount,
 					price=price or 0.0,
-					status="open",
+					status=TradeStatus.open,
 					exchange_order_id=order.get("id")
 			)
 			risk_service.db_session.add(trade)
@@ -209,7 +210,7 @@ async def create_oco_order(
 				price=price,
 				stop_loss=stop_price,
 				take_profit=price,
-				status="open",
+				status=TradeStatus.open,
 				exchange_order_id=order.get("id") if isinstance(order, dict) else None
 			)
 			risk_service.db_session.add(trade)
@@ -238,7 +239,7 @@ async def cancel_order(symbol: str, order_id: str, risk_service: RiskService = N
 			stmt = select(TradeORM).where(TradeORM.exchange_order_id == order_id)
 			trade = (await risk_service.db_session.execute(stmt)).scalar_one_or_none()
 			if trade:
-					trade.status = "canceled"
+					trade.status = TradeStatus.cancelled
 					await risk_service.db_session.commit()
 
 		if telegram:
@@ -292,7 +293,7 @@ async def close_position(symbol: str, risk_service: RiskService = None, telegram
 						stmt = select(TradeORM).where(TradeORM.exchange_order_id == pos["id"])
 						trade = (await risk_service.db_session.execute(stmt)).scalar_one_or_none()
 						if trade:
-							trade.status = "closed"
+							trade.status = TradeStatus.closed 
 							await risk_service.db_session.commit()
 
 		if telegram:
