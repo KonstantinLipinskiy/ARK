@@ -49,6 +49,8 @@ class TradeORM(Base):
 	user = relationship("UserORM", back_populates="trades")
 	signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), index=True)
 	signal = relationship("SignalORM", back_populates="trades")
+	news_sentiment = Column(Float, nullable=True)
+
 
 class BacktestTradeORM(Base):
 	__tablename__ = "backtest_trades"
@@ -94,12 +96,16 @@ class SignalORM(Base):
 	volume = Column(Float, nullable=True)
 	bollinger = Column(Float, nullable=True)
 
+	news_sentiment = Column(Float, nullable=True)  # ✅ добавлено для согласованности
+
 	user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	user = relationship("UserORM", back_populates="signals")
 
 	trades = relationship("TradeORM", back_populates="signal", cascade="all, delete-orphan")
 
 	backtest_trades = relationship("BacktestTradeORM", back_populates="signal", cascade="all, delete-orphan")
+
+
 
 class UserORM(Base):
 	__tablename__ = "users"

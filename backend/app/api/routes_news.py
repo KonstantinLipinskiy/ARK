@@ -33,7 +33,8 @@ async def get_news(
 			symbol=symbol, source=source,
 			date_from=date_from, date_to=date_to
 		)
-		return result
+		# ⚡ возвращаем только список новостей, чтобы совпадало с response_model
+		return result["items"]
 	except SQLAlchemyError as e:
 		log_order_error("get_news", e)
 		raise HTTPException(status_code=500, detail=f"Database error: {e}")

@@ -1,3 +1,4 @@
+#app/models/trade.py
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,6 +23,8 @@ class Trade(BaseModel):
 	exchange_order_id: Optional[str] = Field(None, description="ID ордера на бирже")
 	user_id: Optional[int] = Field(None, description="ID пользователя, которому принадлежит сделка")
 	signal_id: Optional[int] = Field(None, description="ID сигнала, породившего сделку")
+	news_sentiment: Optional[float] = Field(None, description="Средний sentiment новостей, связанных с активом")
+
 
 	class Config:
 		json_schema_extra = {
@@ -41,6 +44,7 @@ class Trade(BaseModel):
 					"risk_reason": "Risk check failed: leverage too high",
 					"exchange_order_id": "BYBIT123456789",
 					"user_id": 1,
-					"signal_id": 101
+					"signal_id": 101,
+					"news_sentiment": -0.12
 			}
 		}

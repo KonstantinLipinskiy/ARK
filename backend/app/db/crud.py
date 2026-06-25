@@ -7,11 +7,10 @@ from sqlalchemy import func
 from app.db import schemas
 from app.models.trade import Trade
 from app.models.signal import Signal
-from app.models.user import User, UserCreate
+from app.models.user import User, UserCreate, UserUpdate
 from app.utils.logger import logger
 from app.config import settings
 from app.utils.security import hash_password
-from app.models.user import UserUpdate
 from datetime import datetime, timedelta, timezone
 
 
@@ -48,7 +47,7 @@ async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
 			confidence_score=getattr(trade, "confidence_score", None),
 			risk_reason=getattr(trade, "risk_reason", None),
 			exchange_order_id=getattr(trade, "exchange_order_id", None),
-			# timestamp не передаём — его выставит БД через server_default=func.now()
+			news_sentiment=getattr(trade, "news_sentiment", None),
 		)
 
 		db.add(db_trade)
@@ -141,7 +140,7 @@ async def update_trade(db: AsyncSession, trade_id: int, updates: dict):
 		"symbol", "side", "amount", "price", "status",
 		"entry_price", "exit_price", "profit_loss", "leverage",
 		"signal_id", "user_id", "exchange_order_id",
-		"stop_loss", "take_profit", "confidence_score", "risk_reason"
+		"stop_loss", "take_profit", "confidence_score", "risk_reason", "news_sentiment"
 	}
 	for key, value in updates.items():
 		if key in allowed_fields:
@@ -178,7 +177,7 @@ async def patch_trade(db: AsyncSession, trade_id: int, updates: dict):
 		"symbol", "side", "amount", "price", "status",
 		"entry_price", "exit_price", "profit_loss", "leverage",
 		"signal_id", "user_id", "exchange_order_id",
-		"stop_loss", "take_profit", "confidence_score", "risk_reason"
+		"stop_loss", "take_profit", "confidence_score", "risk_reason", "news_sentiment"
 	}
 	for key, value in updates.items():
 		if key in allowed_fields and value is not None:
@@ -309,7 +308,9 @@ async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 			vwap=getattr(signal, "vwap", None),
 			ichimoku=getattr(signal, "ichimoku", None),
 			volume=getattr(signal, "volume", None),
-			bollinger=getattr(signal, "bollinger", None)
+			bollinger=getattr(signal, "bollinger", None),
+			news_sentiment=getattr(signal, "news_sentiment", None),  # ✅ добавлено
+			status=getattr(signal, "status", schemas.SignalStatus.active)  # ✅ добавлено
 		)
 		db.add(db_signal)
 		await db.commit()
@@ -330,7 +331,8 @@ async def get_signals(
 	user_id: int = None,
 	trade_id: int = None,
 	date_from: datetime = None,
-	date_to: datetime = None
+	date_to: datetime = None,
+	status: str = None   # ✅ добавлено
 ):
 	query = select(schemas.SignalORM).options(selectinload(schemas.SignalORM.user))
 	if symbol:
@@ -345,6 +347,10 @@ async def get_signals(
 		query = query.filter(schemas.SignalORM.timestamp >= date_from)
 	if date_to:
 		query = query.filter(schemas.SignalORM.timestamp <= date_to)
+	if status:
+		query = query.filter(
+			schemas.SignalORM.status == schemas.SignalStatus(status) if isinstance(status, str) else status
+		)
 
 	total_count = await db.scalar(
 		select(func.count()).select_from(query.subquery())
@@ -360,6 +366,7 @@ async def get_signals(
 		"page_size": limit
 	}
 
+
 async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 	result = await db.execute(select(schemas.SignalORM).filter(schemas.SignalORM.id == signal_id))
 	db_signal = result.scalars().first()
@@ -367,13 +374,17 @@ async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 		return None
 
 	allowed_fields = {
-	"symbol", "indicator", "strength", "confidence",
-	"source", "direction", "user_id",
-	"obv", "stochastic", "vwap", "ichimoku", "volume", "bollinger"
-}
+		"symbol", "indicator", "strength", "confidence",
+		"source", "direction", "user_id",
+		"obv", "stochastic", "vwap", "ichimoku", "volume", "bollinger",
+		"news_sentiment",  # ✅ добавлено
+		"status"           # ✅ добавлено
+	}
 
 	for key, value in updates.items():
 		if key in allowed_fields:
+			if key == "status" and isinstance(value, str):
+				value = schemas.SignalStatus(value)  # ✅ перевод строки в Enum
 			setattr(db_signal, key, value)
 
 	try:
@@ -385,6 +396,7 @@ async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 		logger.error(f"Ошибка обновления сигнала: {e}")
 		raise
 
+
 async def patch_signal(db: AsyncSession, signal_id: int, updates: dict):
 	"""Частичное обновление сигнала (PATCH)."""
 	result = await db.execute(select(schemas.SignalORM).filter(schemas.SignalORM.id == signal_id))
@@ -393,13 +405,17 @@ async def patch_signal(db: AsyncSession, signal_id: int, updates: dict):
 		return None
 
 	allowed_fields = {
-	"symbol", "indicator", "strength", "confidence",
-	"source", "direction", "user_id",
-	"obv", "stochastic", "vwap", "ichimoku", "volume", "bollinger"
-}
+		"symbol", "indicator", "strength", "confidence",
+		"source", "direction", "user_id",
+		"obv", "stochastic", "vwap", "ichimoku", "volume", "bollinger",
+		"news_sentiment",  # ✅ добавлено
+		"status"           # ✅ добавлено
+	}
 
 	for key, value in updates.items():
 		if key in allowed_fields and value is not None:
+			if key == "status" and isinstance(value, str):
+				value = schemas.SignalStatus(value)  # ✅ перевод строки в Enum
 			setattr(db_signal, key, value)
 
 	try:
@@ -410,6 +426,7 @@ async def patch_signal(db: AsyncSession, signal_id: int, updates: dict):
 		await db.rollback()
 		logger.error(f"Ошибка PATCH обновления сигнала: {e}")
 		raise
+
 
 async def delete_signal(db: AsyncSession, signal_id: int):
 	result = await db.execute(select(schemas.SignalORM).filter(schemas.SignalORM.id == signal_id))
@@ -424,6 +441,7 @@ async def delete_signal(db: AsyncSession, signal_id: int):
 		await db.rollback()
 		logger.error(f"Ошибка удаления сигнала: {e}")
 		raise
+
 
 # ---------- Users ----------
 async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
@@ -444,6 +462,7 @@ async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
 			password_hash=password_hash,
 			salt=salt,
 			telegram_id=user.telegram_id,
+			is_admin=user.is_admin,   # ✅ добавлено
 			settings=settings
 		)
 		db.add(db_user)
@@ -529,8 +548,8 @@ async def update_user(db: AsyncSession, user_id: int, updates: UserUpdate) -> sc
 
 	allowed_fields = {
 		"username", "email", "role", "status",
-		"telegram_id", "password_hash", "salt",
-		"last_login", "updated_at", "settings"
+		"telegram_id", "last_login", "updated_at",
+		"is_admin", "settings"   # ✅ оставлены только безопасные поля
 	}
 
 	update_data = updates.dict(exclude_unset=True)
@@ -538,6 +557,7 @@ async def update_user(db: AsyncSession, user_id: int, updates: UserUpdate) -> sc
 	for key, value in update_data.items():
 		if key in allowed_fields:
 			if key == "settings" and value:
+				# обновляем словарь настроек вместо перезаписи
 				db_user.settings.update(value)
 			else:
 				setattr(db_user, key, value)

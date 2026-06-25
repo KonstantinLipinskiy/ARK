@@ -1,3 +1,4 @@
+#app/models/signal.py
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone
 from typing import Optional
@@ -40,6 +41,10 @@ class Signal(BaseModel):
 	volume: Optional[float] = Field(None, description="Trading volume")
 	bollinger: Optional[float] = Field(None, description="Bollinger Bands value")
 
+	news_sentiment: Optional[float] = Field(None, description="Sentiment из новостей")  # ✅ добавлено
+
+	status: Literal["active", "inactive"] = Field(default="active", description="Статус сигнала")
+
 	@field_validator("timestamp")
 	def validate_timestamp(cls, v: datetime) -> datetime:
 		"""Проверка, что timestamp не в будущем."""
@@ -78,6 +83,8 @@ class Signal(BaseModel):
 					"vwap": 1850.5,
 					"ichimoku": 0.66,
 					"volume": 25000.0,
-					"bollinger": 1900.0
+					"bollinger": 1900.0,
+					"news_sentiment": -0.3,
+					"status": "active"
 			}
 		}

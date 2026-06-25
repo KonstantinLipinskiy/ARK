@@ -44,6 +44,7 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 		password_hash=password_hash,
 		salt=salt,
 		telegram_id=user.telegram_id,
+		is_admin=user.is_admin,   # ✅ добавлено для синхронности
 		settings=user.settings
 	)
 	db.add(new_user)

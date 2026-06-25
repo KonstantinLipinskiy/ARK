@@ -17,7 +17,8 @@ from app.services.exchange import load_strategies
 from app.broker.rabbitmq import RabbitMQBroker
 from app.db import crud
 from app.models.trade import Trade
-from scripts.fetch_data import update_csv, PAIRS
+from scripts.fetch_data import update_csv
+from app.config import settings
 from app.db.schemas import TradeStatus, SignalDirection  # 🔹 добавлен импорт Enum
 
 ml_service = MLService()
@@ -430,7 +431,7 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: st
 if __name__ == "__main__":
 	# 🔹 Обновляем данные для всех пар перед бэктестом
 	os.makedirs("data", exist_ok=True)
-	for pair in PAIRS:
+	for pair in settings.PAIRS:
 		update_csv(symbol=pair, timeframe="1h", days=60, out_dir="data")
 
 	loop = asyncio.get_event_loop()
