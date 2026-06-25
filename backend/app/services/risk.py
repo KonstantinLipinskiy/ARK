@@ -21,13 +21,19 @@ class RiskService:
 		self.db_session = db_session
 		self.broker = RabbitMQBroker()
 		self.last_trade_time = None
-		asyncio.create_task(self.broker.connect())
 
 		self.STRATEGY_CONFIG = {}
 		self.RISK_CONFIG = {}
 		self._user_risk_cache = {}
 
-		asyncio.create_task(self.refresh_config())
+	async def connect(self):
+		"""Явное подключение брокера и загрузка конфигов."""
+		await self.broker.connect()
+		await self.refresh_config()
+
+	async def close(self):
+		"""Закрытие соединения брокера."""
+		await self.broker.close()
 
 	async def refresh_config(self):
 		"""Обновить стратегии и риск‑параметры из БД"""
@@ -39,14 +45,9 @@ class RiskService:
 		except Exception as e:
 			logger.error(f"❌ Failed to refresh configs: {e}")
 
-
 	# --- Новый метод для Telegram ---
 	async def get_limits(self, user_id: int | None = None) -> dict:
-		"""
-		Возвращает ключевые лимиты риск‑менеджмента для Telegram команд.
-		"""
 		risk_config = await self.get_user_risk_config(user_id) if user_id else self.RISK_CONFIG
-
 		return {
 			"stop_loss_pct": risk_config.get("stop_loss_pct", "-"),
 			"default_trade_loss_pct": risk_config.get("default_trade_loss_pct", "-"),
@@ -59,7 +60,6 @@ class RiskService:
 			"strength_multiplier": risk_config.get("strength_multiplier", "-"),
 		}
 
-
 	# --- FUNDING RATE ---
 	async def save_funding_rate(self, symbol: str):
 		"""Получить и сохранить ставку финансирования в БД."""
@@ -67,24 +67,14 @@ class RiskService:
 			funding = await get_funding_rate(symbol)
 			if "error" in funding:
 				return funding
-
-			record = FundingRateORM(
-				symbol=symbol,
-				rate=funding["fundingRate"],
-				timestamp=funding["timestamp"]
-			)
+			record = FundingRateORM(symbol=symbol, rate=funding["fundingRate"], timestamp=funding["timestamp"])
 			self.db_session.add(record)
 			await self.db_session.commit()
-
-			logger.info(
-				f"✅ Funding rate saved | {symbol} | rate={funding['fundingRate']} | ts={funding['timestamp']}"
-			)
+			logger.info(f"✅ Funding rate saved | {symbol} | rate={funding['fundingRate']} | ts={funding['timestamp']}")
 			return record
-
 		except Exception as e:
 			logger.error(f"❌ Failed to save funding rate for {symbol}: {e}")
 			return {"error": str(e)}
-
 
 	# --- LIQUIDATION RISK ---
 	async def check_liquidation_risk(self, symbol: str, entry_price: float, leverage: int) -> bool:
@@ -93,53 +83,37 @@ class RiskService:
 			mark = await get_mark_price(symbol)
 			if "error" in mark:
 				return False
-
 			mark_price = mark["markPrice"]
 			liquidation_threshold = entry_price * (1 - 1 / leverage)
-
 			if mark_price <= liquidation_threshold:
-				logger.warning(
-					f"⚠️ {symbol} близко к ликвидации | Mark={mark_price} | Entry={entry_price} | Lev={leverage} | Threshold={liquidation_threshold}"
-				)
+				logger.warning(f"⚠️ {symbol} близко к ликвидации | Mark={mark_price} | Entry={entry_price} | Lev={leverage} | Threshold={liquidation_threshold}")
 				return True
-
 			return False
-
 		except Exception as e:
 			logger.error(f"❌ Liquidation risk check failed for {symbol}: {e}")
 			return False
-
 
 	async def get_user_risk_config(self, user_id: int) -> dict:
 		"""Возвращает индивидуальные параметры риска пользователя (с кэшированием)."""
 		if user_id in self._user_risk_cache:
 			return self._user_risk_cache[user_id]
-
 		try:
-			result = await self.db_session.execute(
-				select(UserORM).filter(UserORM.id == user_id)
-			)
+			result = await self.db_session.execute(select(UserORM).filter(UserORM.id == user_id))
 			user = result.scalars().first()
-
 			if not user or not user.settings:
 				self._user_risk_cache[user_id] = self.RISK_CONFIG
 				return self.RISK_CONFIG
-
 			profile = user.settings.get("risk_profile")
 			custom_config = user.settings.get("custom_risk", {})
-
 			if profile and profile in RISK_PROFILES:
 				config = {**self.RISK_CONFIG, **RISK_PROFILES[profile], **custom_config}
 			else:
 				config = {**self.RISK_CONFIG, **custom_config}
-
 			self._user_risk_cache[user_id] = config
 			return config
-
 		except Exception as e:
 			logger.error(f"❌ Failed to load user risk profile for user_id={user_id}: {e}")
 			return self.RISK_CONFIG
-
 
 	async def _get_pair_performance(self, symbol: str) -> float:
 		"""Возвращает коэффициент производительности пары на основе winrate/прибыльности."""
@@ -152,21 +126,14 @@ class RiskService:
 				).where(TradeORM.symbol == symbol)
 			)
 			total_trades, total_profit, wins = result.first()
-
-			# Если сделок мало — возвращаем нейтральный коэффициент
 			if not total_trades or total_trades < 30:
 				logger.info(f"ℹ️ Недостаточно данных для {symbol}: trades={total_trades}")
 				return 1.0
-
 			winrate = wins / total_trades
 			avg_profit = (total_profit / total_trades) if total_trades else 0
 			performance_factor = max(0.5, min(2.0, winrate * (1 + avg_profit)))
-
-			logger.debug(
-				f"📊 Performance factor calculated | {symbol} | trades={total_trades} | winrate={winrate:.2f} | avg_profit={avg_profit:.4f} | factor={performance_factor:.2f}"
-			)
+			logger.debug(f"📊 Performance factor calculated | {symbol} | trades={total_trades} | winrate={winrate:.2f} | avg_profit={avg_profit:.4f} | factor={performance_factor:.2f}")
 			return performance_factor
-
 		except Exception as e:
 			logger.error(f"❌ Failed to calculate performance for {symbol}: {e}")
 			return 1.0

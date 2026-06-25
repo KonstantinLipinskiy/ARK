@@ -16,6 +16,7 @@ from app.services.reports import ReportsService
 settings = Settings()
 bot = Bot(token=settings.TELEGRAM_TOKEN)
 dp = Dispatcher()
+broker = RabbitMQBroker()
 
 class TelegramService:
 	def __init__(self, bot: Bot):
@@ -23,130 +24,89 @@ class TelegramService:
 		self.reports_service = ReportsService()
 
 	async def send_message(self, text: str, telegram_id: str | None = None):
-		"""Универсальная отправка сообщения (по умолчанию админу)."""
+		"""Универсальная отправка сообщения (по умолчанию админу) через брокер."""
 		target_id = telegram_id or getattr(settings, "ADMIN_TELEGRAM_ID", None)
 		if not target_id:
 			logger.error("❌ ADMIN_TELEGRAM_ID не задан")
 			return
-		try:
-			await self.bot.send_message(chat_id=target_id, text=text)
-			logger.info(f"📤 Сообщение отправлено в чат {target_id}")
-		except Exception as e:
-			logger.error(f"Ошибка отправки сообщения: {e}")
+		payload = {"type": "info", "text": text, "user_id": None}
+		await broker.publish_telegram(payload)
+		logger.info(f"📤 Сообщение отправлено в очередь Telegram: {text}")
 
 	async def send_message_to_user(self, user: UserORM, text: str):
-		"""Отправка сообщения конкретному пользователю по его telegram_id."""
+		"""Отправка сообщения конкретному пользователю через брокер."""
 		if not user.telegram_id:
 			logger.warning(f"❌ У пользователя {user.username} нет telegram_id")
 			return
 		if user.settings and not user.settings.get("notifications_enabled", True):
 			logger.info(f"🔕 Уведомления отключены для пользователя {user.username}")
 			return
-		try:
-			await self.bot.send_message(chat_id=user.telegram_id, text=text)
-		except Exception as e:
-			logger.error(f"Ошибка отправки сообщения пользователю {user.username}: {e}")
+		payload = {"type": "info", "text": text, "user_id": user.id}
+		await broker.publish_telegram(payload)
+		logger.info(f"📤 Сообщение отправлено в очередь Telegram для {user.username}")
 
 	async def send_message_by_id(self, telegram_id: str, text: str):
-		"""Отправка сообщения по telegram_id напрямую (используется в TelegramHandler)."""
+		"""Отправка сообщения по telegram_id напрямую через брокер."""
 		if not telegram_id:
 			logger.error("❌ ADMIN_TELEGRAM_ID не задан, невозможно отправить сообщение")
 			return
-		try:
-			await self.bot.send_message(chat_id=telegram_id, text=text)
-		except Exception as e:
-			logger.error(f"Ошибка отправки сообщения по telegram_id={telegram_id}: {e}")
+		payload = {"type": "info", "text": text, "user_id": None}
+		await broker.publish_telegram(payload)
 
 	async def send_trade_notification(self, trade: dict, user_id: int | None = None):
-		"""Уведомление о сделке с расширенным форматом (PnL, SL, TP)."""
-		async with get_session() as session:
-			if user_id:
-				result = await session.execute(select(UserORM).where(UserORM.id == user_id))
-				user = result.scalars().first()
-				if user:
-					msg = (
-						f"💹 Сделка: {trade.get('symbol', 'N/A')} {trade.get('side', '-')}\n"
-						f"Статус: {trade.get('status', '-')}\n"
-						f"Вход: {trade.get('entry_price', '-')}\n"
-						f"Выход: {trade.get('exit_price', '-')}\n"
-						f"PnL: {trade.get('profit_loss', '-')}\n"
-						f"Стоп-лосс: {trade.get('stop_loss', '-')}\n"
-						f"Тейк-профит: {trade.get('take_profit', '-')}\n"
-						f"Leverage: {trade.get('leverage', '-')}\n"
-						f"Confidence: {trade.get('confidence_score', '-')}\n"
-						f"Риск: {trade.get('risk_reason', '-')}"
-					)
-					await self.send_message_to_user(user, msg)
-					logger.info(f"📤 Уведомление о сделке отправлено пользователю {user.username}")
+		"""Уведомление о сделке."""
+		payload = {"type": "trade", "trade": trade, "user_id": user_id}
+		await broker.publish_telegram(payload)
 
 	async def send_signal_notification(self, signal: dict, user_id: int | None = None):
-		"""Уведомление о новом сигнале."""
-		async with get_session() as session:
-			if user_id:
-				result = await session.execute(select(UserORM).where(UserORM.id == user_id))
-				user = result.scalars().first()
-				if user:
-					msg = (
-						f"📈 Новый сигнал: {signal.get('symbol', 'N/A')} {signal.get('direction', '-')}\n"
-						f"Индикатор: {signal.get('indicator', '-')}\n"
-						f"Сила: {signal.get('strength', '-')}\n"
-						f"Confidence: {signal.get('confidence', '-')}\n"
-						f"Источник: {signal.get('source', '-')}\n"
-						f"Время: {signal.get('timestamp', '-')}"
-					)
-					await self.send_message_to_user(user, msg)
-					logger.info(f"📤 Уведомление о сигнале отправлено пользователю {user.username}")
+		"""Уведомление о сигнале."""
+		payload = {"type": "signal", "signal": signal, "user_id": user_id}
+		await broker.publish_telegram(payload)
 
 	async def send_error(self, error: str, user_id: int | None = None,
 							symbol: str = "-", position_size: float = 0.0, deposit: float = 0.0):
 		"""Уведомление об ошибке."""
-		async with get_session() as session:
-			if user_id:
-				result = await session.execute(select(UserORM).where(UserORM.id == user_id))
-				user = result.scalars().first()
-				if user:
-					msg = (
-						f"❌ Ошибка: {error}\n"
-						f"Символ: {symbol}\n"
-						f"Размер позиции: {position_size:.4f}\n"
-						f"Депозит: {deposit:.2f}"
-					)
-					await self.send_message_to_user(user, msg)
+		payload = {
+			"type": "error",
+			"error": error,
+			"symbol": symbol,
+			"position_size": position_size,
+			"deposit": deposit,
+			"user_id": user_id
+		}
+		await broker.publish_telegram(payload)
 
 	async def send_order_cancelled(self, user: UserORM, symbol: str, order_id: str, reason: str = "Cancelled"):
-		msg = f"❌ Ордер отменён: {symbol}, id={order_id}, причина: {reason}"
-		await self.send_message_to_user(user, msg)
+		payload = {"type": "order_cancelled", "symbol": symbol, "order_id": order_id, "reason": reason, "user_id": user.id}
+		await broker.publish_telegram(payload)
 
 	async def send_position_closed(self, user: UserORM, symbol: str, amount: float, side: str, exit_price: float,
 									stop_loss: float | None = None, risk: float | None = None):
-		msg = (
-			f"📉 Позиция закрыта: {symbol} {amount} {side} @ {exit_price}\n"
-			f"Стоп-лосс: {stop_loss if stop_loss else '-'}\n"
-			f"Риск: {risk if risk else '-'}"
-		)
-		await self.send_message_to_user(user, msg)
+		payload = {
+			"type": "position_closed",
+			"symbol": symbol,
+			"amount": amount,
+			"side": side,
+			"exit_price": exit_price,
+			"stop_loss": stop_loss,
+			"risk": risk,
+			"user_id": user.id
+		}
+		await broker.publish_telegram(payload)
 
 	async def send_margin_mode_changed(self, user: UserORM, symbol: str, mode: str):
-		msg = f"⚙️ Маржинальный режим изменён: {symbol}, новый режим = {mode}"
-		await self.send_message_to_user(user, msg)
+		payload = {"type": "margin_mode_changed", "symbol": symbol, "mode": mode, "user_id": user.id}
+		await broker.publish_telegram(payload)
 
-	# 🔹 Новые уведомления для админских функций
 	async def send_user_blocked(self, user: UserORM):
-		msg = f"⛔ Пользователь {user.username} (ID={user.id}) был заблокирован администратором."
-		await self.send_message_to_user(user, msg)
-		logger.info(f"📤 Уведомление о блокировке отправлено пользователю {user.username}")
+		payload = {"type": "user_blocked", "user_id": user.id, "username": user.username}
+		await broker.publish_telegram(payload)
 
 	async def send_strategy_updated(self, strategy: dict, admin_id: str | None = None):
-		msg = (
-			f"⚙️ Стратегия обновлена: {strategy.get('symbol', '-')}\n"
-			f"Параметры: {strategy}"
-		)
-		if admin_id:
-			await self.send_message_by_id(admin_id, msg)
-		logger.info(f"📤 Уведомление об изменении стратегии: {strategy.get('symbol', '-')}")
+		payload = {"type": "strategy_updated", "strategy": strategy, "user_id": None}
+		await broker.publish_telegram(payload)
 
 telegram_service = TelegramService(bot)
-broker = RabbitMQBroker()
 
 # -------------------------------------------------------------------
 # Вспомогательные функции авторизации
@@ -158,7 +118,7 @@ async def get_user_by_chat_id(chat_id: int) -> UserORM | None:
 
 async def is_authorized(message: types.Message) -> bool:
 	user = await get_user_by_chat_id(message.chat.id)
-	if not user or user.status != UserStatus.active:   # ✅ Enum вместо строки
+	if not user or user.status != UserStatus.active:
 		logger.warning(f"Попытка доступа от неавторизованного chat_id: {message.chat.id}")
 		return False
 	return True
@@ -181,9 +141,7 @@ async def status_command(message: types.Message):
 	if not await is_authorized(message):
 		return
 	async with get_session() as session:
-		result = await session.execute(
-			select(TradeORM).order_by(TradeORM.timestamp.desc()).limit(10)
-		)
+		result = await session.execute(select(TradeORM).order_by(TradeORM.timestamp.desc()).limit(10))
 		trades = result.scalars().all()
 		if trades:
 			msg = "\n".join([
@@ -202,7 +160,6 @@ async def report_command(message: types.Message):
 	async with get_session() as session:
 		result = await session.execute(select(TradeORM))
 		trades = result.scalars().all()
-		# 🔹 Используем ReportsService для единообразия
 		report_text = telegram_service.reports_service.generate_rag_report(
 			[t.__dict__ for t in trades], output_format="markdown"
 		)

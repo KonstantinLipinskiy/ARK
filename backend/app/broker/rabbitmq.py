@@ -1,3 +1,4 @@
+#app/broker/rabbitmq.py
 import asyncio
 import aio_pika
 import time
@@ -51,7 +52,7 @@ class RabbitMQBroker:
 			# Очереди
 			for q in self.queues:
 				queue = await self.channel.declare_queue(q, durable=True)
-				await self.exchange.bind(q, routing_key=q)
+				await queue.bind(self.exchange, routing_key=q)  # ⚡ каноничный вызов
 				self.declared_queues[q] = queue
 
 			logger.info("✅ RabbitMQ connected, exchange declared and queues bound")
@@ -141,8 +142,6 @@ class RabbitMQBroker:
 		try:
 			if self.channel:
 				await self.channel.close()
-			if self.exchange:
-				await self.exchange.delete(if_unused=False)
 			if self.connection:
 				await self.connection.close()
 			logger.info("🔌 RabbitMQ connection closed")
@@ -164,3 +163,12 @@ class RabbitMQBroker:
 			"last_processing_time": last_time,
 			"max_processing_time": max_time
 		}
+
+# --- Глобальный объект и функции для main.py ---
+broker = RabbitMQBroker()
+
+async def init_rabbitmq():
+	await broker.connect()
+
+async def close_rabbitmq():
+	await broker.close()

@@ -1,7 +1,6 @@
 #app/services/telegram_worker.py
 import os
 import asyncio
-import json
 from aiogram import Bot
 from sqlalchemy import select
 
@@ -24,18 +23,13 @@ async def get_user_by_id(user_id: int) -> UserORM | None:
 		)
 		return result.scalars().first()
 
-async def process_notification(message: str):
+async def process_notification(payload: dict):
 	"""
 	Обработка уведомления из очереди RabbitMQ.
-	message: строка (JSON или dict в виде строки)
+	payload: dict (RabbitMQ уже возвращает JSON-декодированный объект)
 	"""
-	logger.info(f"📨 Telegram worker получил сообщение: {message}")
+	logger.info(f"📨 Telegram worker получил сообщение: {payload}")
 	try:
-		try:
-			payload = json.loads(message)
-		except Exception:
-			payload = {"text": message}
-
 		text = payload.get("text", "")
 		msg_type = payload.get("type", "info")
 		user_id = payload.get("user_id")
@@ -135,7 +129,7 @@ async def process_notification(message: str):
 	except Exception as e:
 		logger.error(f"❌ Ошибка обработки уведомления: {e}")
 		# публикуем ошибку в alerts_queue
-		await broker.publish_alert({"type": "telegram_error", "error": str(e), "payload": message})
+		await broker.publish_alert({"type": "telegram_error", "error": str(e), "payload": payload})
 
 async def consume_notifications():
 	"""Подключение к RabbitMQ и прослушивание очередей уведомлений."""

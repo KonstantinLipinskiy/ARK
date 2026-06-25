@@ -1,5 +1,5 @@
+#app/services/reports_worker.py
 import asyncio
-import json
 import time
 from app.services.reports import ReportsService
 from app.broker.rabbitmq import RabbitMQBroker
@@ -10,20 +10,13 @@ class ReportsWorker:
 	def __init__(self, collection_name: str = "trades"):
 		self.broker = RabbitMQBroker()
 		self.reports_service = ReportsService(collection_name=collection_name)
-		self.queue_name = "queue_reports"
+		# ⚡ имя очереди унифицировано с брокером
+		self.queue_name = "reports_queue"
 
-	async def start(self):
-		"""Запуск воркера: подключение к RabbitMQ и прослушивание очереди."""
-		await self.broker.connect()
-		await self.broker.channel.queue_declare(queue=self.queue_name, durable=True)
-		await self.broker.channel.basic_consume(self.queue_name, self.handle_message, auto_ack=False)
-		logger.info("🚀 ReportsWorker запущен и слушает очередь queue_reports")
-
-	async def handle_message(self, message):
+	async def process_message(self, body: dict):
 		"""Обработка входящего запроса на генерацию отчёта."""
 		start_time = time.time()
 		try:
-			body = json.loads(message.body.decode())
 			trades = body.get("trades", [])
 			filters = body.get("filters")
 			user_id = body.get("user_id")
@@ -63,7 +56,6 @@ class ReportsWorker:
 				"latency": duration
 			}
 			await self.broker.publish_telegram(response_payload)
-			await message.ack()
 			logger.info(f"📤 Отчёт отправлен пользователю {user_id}, формат={export_format}")
 
 		except Exception as e:
@@ -74,11 +66,26 @@ class ReportsWorker:
 				"user_id": body.get("user_id", None)
 			}
 			await self.broker.publish_telegram(error_payload)
-			await message.ack()
+
+	async def start(self):
+		"""Запуск воркера: подключение к RabbitMQ и прослушивание очереди reports_queue."""
+		await self.broker.connect()
+		try:
+			await self.broker.consume_reports(
+				callback=lambda payload: asyncio.create_task(self.process_message(payload))
+			)
+		finally:
+			await self.broker.close()
+			logger.info("🔌 ReportsWorker stopped, RabbitMQ connection closed")
 
 async def main():
 	worker = ReportsWorker(collection_name="trades")
 	await worker.start()
 
 if __name__ == "__main__":
-	asyncio.run(main())
+	try:
+		asyncio.run(main())
+	except KeyboardInterrupt:
+		logger.info("🛑 ReportsWorker stopped manually")
+	except Exception as e:
+		logger.error(f"❌ Fatal error in ReportsWorker: {e}")

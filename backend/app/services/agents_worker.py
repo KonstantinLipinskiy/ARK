@@ -1,6 +1,5 @@
 #app/services/agents_worker.py
 import asyncio
-import json
 import time
 from app.services.agents import AgentsService
 from app.broker.rabbitmq import RabbitMQBroker
@@ -13,20 +12,11 @@ class AgentsWorker:
 		self.broker = RabbitMQBroker()
 		# AgentsService без лишних параметров — всё читается из config.py
 		self.agents_service = AgentsService()
-		self.queue_name = "queue_agents"
 
-	async def start(self):
-		"""Запуск воркера: подключение к RabbitMQ и прослушивание очереди."""
-		await self.broker.connect()
-		await self.broker.channel.queue_declare(queue=self.queue_name, durable=True)
-		await self.broker.channel.basic_consume(self.queue_name, self.handle_message, auto_ack=False)
-		logger.info("🚀 AgentsWorker запущен и слушает очередь queue_agents")
-
-	async def handle_message(self, message):
+	async def process_message(self, body: dict):
 		"""Обработка входящего запроса агента."""
 		start_time = time.time()
 		try:
-			body = json.loads(message.body.decode())
 			query = body.get("query")
 			user_id = body.get("user_id")
 			output_format = body.get("output_format", "text")  # text | json | markdown | html
@@ -51,8 +41,8 @@ class AgentsWorker:
 				"result": result,
 				"latency": latency
 			}
-			await self.broker.publish("queue_telegram", response_payload)
-			await message.ack()
+			# ⚡ публикация ответа в очередь telegram_notifications через publish_telegram
+			await self.broker.publish_telegram(response_payload)
 			logger.info(
 				f"📤 Ответ агента отправлен пользователю {user_id}, формат={output_format}, результат={str(result)[:100]}..."
 			)
@@ -66,12 +56,28 @@ class AgentsWorker:
 				"query": body.get("query", "-"),
 				"user_id": body.get("user_id", None)
 			}
-			await self.broker.publish("queue_telegram", error_payload)
-			await message.ack()
+			# ⚡ публикация ошибки также в telegram_notifications
+			await self.broker.publish_telegram(error_payload)
+
+	async def start(self):
+		"""Запуск воркера: подключение к RabbitMQ и прослушивание очереди agents_queue."""
+		await self.broker.connect()
+		try:
+			await self.broker.consume_agents(
+				callback=lambda payload: asyncio.create_task(self.process_message(payload))
+			)
+		finally:
+			await self.broker.close()
+			logger.info("🔌 AgentsWorker stopped, RabbitMQ connection closed")
 
 async def main():
 	worker = AgentsWorker()
 	await worker.start()
 
 if __name__ == "__main__":
-	asyncio.run(main())
+	try:
+		asyncio.run(main())
+	except KeyboardInterrupt:
+		logger.info("🛑 AgentsWorker stopped manually")
+	except Exception as e:
+		logger.error(f"❌ Fatal error in AgentsWorker: {e}")

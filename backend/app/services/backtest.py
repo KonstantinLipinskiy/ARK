@@ -18,14 +18,17 @@ from app.broker.rabbitmq import RabbitMQBroker
 from app.db import crud
 from app.models.trade import Trade
 from scripts.fetch_data import update_csv
-from app.config import settings
 from app.db.schemas import TradeStatus, SignalDirection  # 🔹 добавлен импорт Enum
 
 ml_service = MLService()
 ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
 
 broker = RabbitMQBroker()
-asyncio.create_task(broker.connect())
+
+async def ensure_broker_connected():
+	"""Ленивое подключение брокера при первой публикации."""
+	if broker.connection is None or broker.connection.is_closed:
+		await broker.connect()
 
 def build_features(row: pd.Series) -> dict:
 	return {
@@ -295,12 +298,6 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 	return trades
 
 
-
-
-
-
-
-
 # --- Метрики ---
 def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
 	if not trades:
@@ -508,3 +505,7 @@ if __name__ == "__main__":
 		from app.utils.export import export_to_excel
 		export_to_excel(all_metrics, all_results)
 		print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
+
+	# ✅ Закрываем брокер после завершения бэктеста
+	loop.run_until_complete(broker.close())
+	logger.info("🔌 RabbitMQ connection closed after backtests")

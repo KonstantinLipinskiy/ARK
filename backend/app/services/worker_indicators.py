@@ -1,6 +1,5 @@
 #app/services/worker_indicators.py
 import asyncio
-import json
 import time
 from app.services.indicators_service import IndicatorsService
 from app.db.session import get_session
@@ -166,9 +165,14 @@ class IndicatorWorker:
 
 	async def start(self):
 		logger.info(f"🚀 IndicatorWorker started, listening on queue: {self.queue_name}")
-		await self.broker.consume_indicators(
-			callback=lambda msg: asyncio.create_task(self.process_message(json.loads(msg)))
-		)
+		await self.broker.connect()
+		try:
+			await self.broker.consume_indicators(
+				callback=lambda payload: asyncio.create_task(self.process_message(payload))
+			)
+		finally:
+			await self.broker.close()
+			logger.info("🔌 IndicatorWorker stopped, RabbitMQ connection closed")
 
 if __name__ == "__main__":
 	worker = IndicatorWorker()

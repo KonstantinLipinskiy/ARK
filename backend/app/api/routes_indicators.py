@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db import crud
-from app.broker.rabbitmq import RabbitMQBroker
+from app.broker.rabbitmq import broker  # ⚡ используем глобальный объект
 from app.cache.redis import RedisCache
 from app.services.indicator_factory import IndicatorFactory
 from app.utils.logger import (
@@ -39,9 +39,6 @@ async def calculate_indicator(
 	try:
 		IndicatorFactory.validate_indicator(task.indicator)
 
-		broker = RabbitMQBroker()
-		await broker.connect()
-
 		task_id = str(uuid.uuid4())
 		payload = {
 			"task_id": task_id,
@@ -53,8 +50,8 @@ async def calculate_indicator(
 
 		start_time = time.time()
 
+		# ⚡ используем глобальный broker, который уже подключён в lifespan
 		await broker.publish_indicator(payload)
-		await broker.close()
 
 		redis = RedisCache()
 		await redis.set_task_status(task_id, "queued")

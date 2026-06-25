@@ -1,6 +1,5 @@
 #app/services/worker_backtest.py
 import asyncio
-import json
 import pandas as pd
 from app.services.backtest import (
 	backtest_strategy,
@@ -47,7 +46,7 @@ class BacktestWorker:
 							results = await backtest_strategy(df, pair, strategy)
 							metrics = calculate_metrics(results)
 
-							# 🔹 сохраняем сделки и метрики с Enum‑значениями
+							# 🔹 сохраняем сделки и метрики
 							await save_trades_to_db(results, pair, strategy_name=strategy_name, session=session)
 							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name, session=session)
 
@@ -86,10 +85,15 @@ class BacktestWorker:
 
 	async def start(self):
 		logger.info(f"🚀 BacktestWorker started, listening on queue: {self.queue_name}")
-		await self.broker.consume(
-			queue_name=self.queue_name,
-			callback=lambda msg: asyncio.create_task(self.process_message(json.loads(msg)))
-		)
+		await self.broker.connect()
+		try:
+			# ⚡ используем публичный метод consume_backtest
+			await self.broker.consume_backtest(
+				callback=lambda payload: asyncio.create_task(self.process_message(payload))
+			)
+		finally:
+			await self.broker.close()
+			logger.info("🔌 BacktestWorker stopped, RabbitMQ connection closed")
 
 if __name__ == "__main__":
 	worker = BacktestWorker()
