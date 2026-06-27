@@ -1,4 +1,4 @@
-#app/services/worker_backtest.py
+# app/services/worker_backtest.py
 import asyncio
 import pandas as pd
 from app.services.backtest import (
@@ -31,7 +31,8 @@ class BacktestWorker:
 			data_file = message.get("data_file")
 
 			if not pair or not data_file or not strategies:
-				logger.error(f"❌ Invalid backtest message: {message}")
+				logger.error(f"❌ Invalid backtest message: {message}",
+								extra={"operation": "worker_backtest", "collection": "validation"})
 				return
 
 			df = pd.read_csv(data_file)
@@ -58,22 +59,27 @@ class BacktestWorker:
 									)
 									train_metrics = ml_service.train(df_trades, model_type=settings.MODEL_TYPE)
 									ml_service.save_model(settings.MODEL_PATH)
-									logger.info(f"🤖 ML обучение завершено для {pair} ({strategy_name}): {train_metrics}")
+									logger.info(f"🤖 ML обучение завершено для {pair} ({strategy_name}): {train_metrics}",
+												extra={"operation": "worker_backtest", "collection": "ml"})
 							except Exception as e:
-								logger.error(f"❌ Ошибка обучения ML: {e}")
+								logger.error(f"❌ Ошибка обучения ML: {e}",
+												extra={"operation": "worker_backtest", "collection": "ml"})
 								await crud.create_risk_log(session, {"reason": f"ML training failed: {e}", "symbol": pair})
 
-							logger.info(f"✅ Backtest completed for {pair} ({strategy_name}) — {metrics}")
+							logger.info(f"✅ Backtest completed for {pair} ({strategy_name}) — {metrics}",
+										extra={"operation": "worker_backtest", "collection": "backtest"})
 
 							if settings.DEBUG_EXPORT:
 								try:
 									plot_backtest(df, results, pair, strategy_name)
 								except Exception as e:
-									logger.error(f"Ошибка визуализации {pair} ({strategy_name}): {e}")
+									logger.error(f"Ошибка визуализации {pair} ({strategy_name}): {e}",
+													extra={"operation": "worker_backtest", "collection": "plot"})
 									await crud.create_risk_log(session, {"reason": f"Plot failed: {e}", "symbol": pair})
 
 						except Exception as e:
-							logger.error(f"❌ Ошибка бэктеста для {pair} ({strategy_name}): {e}")
+							logger.error(f"❌ Ошибка бэктеста для {pair} ({strategy_name}): {e}",
+											extra={"operation": "worker_backtest", "collection": "backtest"})
 							await crud.create_risk_log(session, {"reason": f"Backtest failed: {e}", "symbol": pair})
 
 					tasks.append(run_single_backtest())
@@ -81,10 +87,12 @@ class BacktestWorker:
 				await asyncio.gather(*tasks)
 
 		except Exception as e:
-			logger.error(f"❌ BacktestWorker error: {e}")
+			logger.error(f"❌ BacktestWorker error: {e}",
+							extra={"operation": "worker_backtest", "collection": "runtime"})
 
 	async def start(self):
-		logger.info(f"🚀 BacktestWorker started, listening on queue: {self.queue_name}")
+		logger.info(f"🚀 BacktestWorker started, listening on queue: {self.queue_name}",
+					extra={"operation": "worker_backtest", "collection": "lifecycle"})
 		await self.broker.connect()
 		try:
 			# ⚡ используем публичный метод consume_backtest
@@ -93,13 +101,16 @@ class BacktestWorker:
 			)
 		finally:
 			await self.broker.close()
-			logger.info("🔌 BacktestWorker stopped, RabbitMQ connection closed")
+			logger.info("🔌 BacktestWorker stopped, RabbitMQ connection closed",
+						extra={"operation": "worker_backtest", "collection": "lifecycle"})
 
 if __name__ == "__main__":
 	worker = BacktestWorker()
 	try:
 		asyncio.run(worker.start())
 	except KeyboardInterrupt:
-		logger.info("🛑 BacktestWorker stopped manually")
+		logger.info("🛑 BacktestWorker stopped manually",
+					extra={"operation": "worker_backtest", "collection": "lifecycle"})
 	except Exception as e:
-		logger.error(f"❌ Fatal error in BacktestWorker: {e}")
+		logger.error(f"❌ Fatal error in BacktestWorker: {e}",
+						extra={"operation": "worker_backtest", "collection": "runtime"})

@@ -208,3 +208,17 @@ class RedisCache:
 			"last_latency": last_latency,
 			"max_latency": max_latency
 		}
+
+
+# --- Глобальный объект и функции для main.py ---
+redis_client = RedisCache()
+
+async def init_redis():
+	ok = await redis_client.health_check()
+	if not ok:
+		logger.error("❌ Redis init failed")
+	else:
+		logger.info("✅ Redis initialized")
+
+async def close_redis():
+	await redis_client.close()

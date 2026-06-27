@@ -82,11 +82,18 @@ async def create_trade(
 		await redis_client.set_json("last_trade", new_trade.dict(), expire=300)
 		logger.info(f"💾 Сделка сохранена в Redis: {new_trade.symbol}")
 
-		msg = (
-			f"💹 Новая сделка: {new_trade.symbol} {new_trade.side} "
-			f"по цене {new_trade.price}, статус: {new_trade.status}"
-		)
-		await send_trade_notification(msg)
+		# ⚡ корректный вызов send_trade_notification — передаём словарь trade
+		trade_payload = {
+			"pair": new_trade.symbol,
+			"side": new_trade.side,
+			"price": new_trade.price,
+			"status": new_trade.status,
+			"amount": new_trade.amount,
+			"leverage": getattr(new_trade, "leverage", None),
+			"confidence_score": getattr(new_trade, "confidence_score", None),
+			"timestamp": str(new_trade.timestamp)
+		}
+		await send_trade_notification(trade_payload, user_id=current_user["user_id"])
 
 		logger.info(f"✅ Сделка создана: {new_trade.symbol} {new_trade.side}")
 		return new_trade

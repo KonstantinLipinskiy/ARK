@@ -18,7 +18,7 @@ from app.broker.rabbitmq import RabbitMQBroker
 from app.db import crud
 from app.models.trade import Trade
 from scripts.fetch_data import update_csv
-from app.db.schemas import TradeStatus, SignalDirection  # 🔹 добавлен импорт Enum
+from app.db.schemas import TradeStatus, SignalDirection
 
 ml_service = MLService()
 ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
@@ -26,7 +26,6 @@ ml_service.load_model(path=settings.MODEL_PATH, model_type=settings.MODEL_TYPE)
 broker = RabbitMQBroker()
 
 async def ensure_broker_connected():
-	"""Ленивое подключение брокера при первой публикации."""
 	if broker.connection is None or broker.connection.is_closed:
 		await broker.connect()
 
@@ -46,12 +45,13 @@ def build_features(row: pd.Series) -> dict:
 		"ichimoku": row.get("ichimoku", 0),
 		"volume": row.get("volume", 0),
 		"volume_ma": row.get("vol_sma", 0),
-		"news_sentiment": row.get("news_sentiment", 0),
+		"sentiment": row.get("news_sentiment", 0),   # 🔹 заменено на согласованный ключ
 		"last_price": row.get("last_price", 0),
 		"spread": row.get("spread", 0),
 		"liquidity_imbalance": row.get("liquidity_imbalance", 0),
 		"mark_price": row.get("mark_price", 0)
 	}
+
 
 @njit
 def fast_equity_curve(profits: np.ndarray, initial_deposit: float):
@@ -166,9 +166,9 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 				# --- Фильтр по sentiment ---
 				sentiment_long = strategy.get("sentiment_long_threshold", -0.5)
 				sentiment_short = strategy.get("sentiment_short_threshold", 0.5)
-				if row.get("news_sentiment", 0) < sentiment_long and direction == SignalDirection.buy:
+				if row.get("sentiment", 0) < sentiment_long and direction == SignalDirection.buy:
 					signals.append(False)
-				if row.get("news_sentiment", 0) > sentiment_short and direction == SignalDirection.sell:
+				if row.get("sentiment", 0) > sentiment_short and direction == SignalDirection.sell:
 					signals.append(False)
 
 				if all(signals):
@@ -192,20 +192,20 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 					)
 
 					position = {
-						"entry": entry_price,
+						"entry_price": entry_price,
 						"entry_index": row.name,
 						"stop": stop_price,
 						"tp": tp_levels,
 						"status": TradeStatus.open,
-						"side": direction,
+						"side": direction.value,
 						"amount": amount,
 						"leverage": leverage,
-						"news_sentiment": row.get("news_sentiment", 0)
+						"sentiment": row.get("sentiment", 0)
 					}
 
 					logger.info(
 						f"📈 Trade opened | {pair} | side={direction.value} | entry={entry_price} | stop={stop_price} | tp={tp_levels} "
-						f"| amount={amount:.4f} | lev={leverage} | sentiment={row.get('news_sentiment', 0)}",
+						f"| amount={amount:.4f} | lev={leverage} | sentiment={row.get('sentiment', 0)}",
 						extra=position
 					)
 
@@ -228,78 +228,98 @@ async def backtest_strategy(data: pd.DataFrame, pair: str, strategy: dict):
 
 		elif position is not None:
 			price = row["close"]
-			if position["side"] == SignalDirection.buy:
+			if position["side"] == SignalDirection.buy.value:
 				if price <= position["stop"]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
-					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
+					position["exit_price"] = price
+					position["exit_index"] = row.name
+					position["status"] = TradeStatus.cancelled
+					pnl = (price - position["entry_price"]) * position["amount"] * position["leverage"]
+					position["profit_loss"] = pnl
 					logger.info(
-						f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
-						f"| status=cancelled | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						f"📉 Trade closed | {pair} | side=long | entry={position['entry_price']} | exit={price} "
+						f"| status=cancelled | pnl={pnl:.4f} | sentiment={position.get('sentiment',0)}",
 						extra=position
 					)
 					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
-					dynamic_stop = position["entry"] - strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
+					dynamic_stop = position["entry_price"] - strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price <= dynamic_stop:
-						position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
-						pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
+						position["exit_price"] = price
+						position["exit_index"] = row.name
+						position["status"] = TradeStatus.cancelled
+						pnl = (price - position["entry_price"]) * position["amount"] * position["leverage"]
+						position["profit_loss"] = pnl
 						logger.info(
-							f"📉 Trade closed | {pair} | side=long | entry={position['entry']} | exit={price} "
-							f"| status=atr_stop | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+							f"📉 Trade closed | {pair} | side=long | entry={position['entry_price']} | exit={price} "
+							f"| status=atr_stop | pnl={pnl:.4f} | sentiment={position.get('sentiment',0)}",
 							extra=position
 						)
 						trades.append(position); position = None
-				elif price >= position["tp"][0]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.closed
-					pnl = (price - position["entry"]) * position["amount"] * position["leverage"]
+			elif price >= position["tp"][0]:
+					position["exit_price"] = price
+					position["exit_index"] = row.name
+					position["status"] = TradeStatus.closed
+					pnl = (price - position["entry_price"]) * position["amount"] * position["leverage"]
+					position["profit_loss"] = pnl
 					logger.info(
-						f"✅ Trade take_profit | {pair} | side=long | entry={position['entry']} | exit={price} "
-						f"| pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						f"✅ Trade take_profit | {pair} | side=long | entry={position['entry_price']} | exit={price} "
+						f"| pnl={pnl:.4f} | sentiment={position.get('sentiment',0)}",
 						extra=position
 					)
 					trades.append(position)
 					position["tp"].pop(0)
-					if len(position["tp"]) == 0: position = None
+					if len(position["tp"]) == 0: 
+						position = None
 
-			elif position["side"] == SignalDirection.sell:
+			elif position["side"] == SignalDirection.sell.value:
 				if price >= position["stop"]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
-					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
+					position["exit_price"] = price
+					position["exit_index"] = row.name
+					position["status"] = TradeStatus.cancelled
+					pnl = (position["entry_price"] - price) * position["amount"] * position["leverage"]
+					position["profit_loss"] = pnl
 					logger.info(
-						f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
-						f"| status=cancelled | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						f"📉 Trade closed | {pair} | side=short | entry={position['entry_price']} | exit={price} "
+						f"| status=cancelled | pnl={pnl:.4f} | sentiment={position.get('sentiment',0)}",
 						extra=position
 					)
 					trades.append(position); position = None
 				elif "ATR" in strategy["enabled_indicators"]:
 					atr_value = row["atr"]
-					dynamic_stop = position["entry"] + strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
+					dynamic_stop = position["entry_price"] + strategy.get("atr_multiplier", settings.ATR_MULTIPLIER) * atr_value
 					if price >= dynamic_stop:
-						position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.cancelled
-						pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
+						position["exit_price"] = price
+						position["exit_index"] = row.name
+						position["status"] = TradeStatus.cancelled
+						pnl = (position["entry_price"] - price) * position["amount"] * position["leverage"]
+						position["profit_loss"] = pnl
 						logger.info(
-							f"📉 Trade closed | {pair} | side=short | entry={position['entry']} | exit={price} "
-							f"| status=atr_stop | pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+							f"📉 Trade closed | {pair} | side=short | entry={position['entry_price']} | exit={price} "
+							f"| status=atr_stop | pnl={pnl:.4f} | sentiment={position.get('sentiment',0)}",
 							extra=position
 						)
 						trades.append(position); position = None
 				elif price <= position["tp"][0]:
-					position["exit"] = price; position["exit_index"] = row.name; position["status"] = TradeStatus.closed
-					pnl = (position["entry"] - price) * position["amount"] * position["leverage"]
+					position["exit_price"] = price
+					position["exit_index"] = row.name
+					position["status"] = TradeStatus.closed
+					pnl = (position["entry_price"] - price) * position["amount"] * position["leverage"]
+					position["profit_loss"] = pnl
 					logger.info(
-						f"✅ Trade take_profit | {pair} | side=short | entry={position['entry']} | exit={price} "
-						f"| pnl={pnl:.4f} | sentiment={position.get('news_sentiment',0)}",
+						f"✅ Trade take_profit | {pair} | side=short | entry={position['entry_price']} | exit={price} "
+						f"| pnl={pnl:.4f} | sentiment={position.get('sentiment',0)}",
 						extra=position
 					)
 					trades.append(position)
 					position["tp"].pop(0)
-					if len(position["tp"]) == 0: position = None
+					if len(position["tp"]) == 0: 
+						position = None
 	return trades
 
 
 # --- Метрики ---
-def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
+def calculate_metrics(trades, pair: str, initial_deposit=settings.DEFAULT_DEPOSIT):
 	if not trades:
 		return {"winrate": 0, "avg_profit": 0, "max_drawdown": 0, "sharpe": 0,
 				"avg_sentiment_win": 0, "avg_sentiment_loss": 0}
@@ -308,9 +328,9 @@ def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
 	slippage = settings.SLIPPAGE_TOLERANCE
 
 	profits = np.array([
-		((t["exit"] - t["entry"]) - (t["entry"] * (commission + slippage)))
+		((t["exit_price"] - t["entry_price"]) - (t["entry_price"] * (commission + slippage)))
 		* t.get("amount", 1.0) * t.get("leverage", 1)
-		for t in trades if "exit" in t
+		for t in trades if "exit_price" in t
 	])
 
 	equity_curve, drawdowns = fast_equity_curve(profits, initial_deposit)
@@ -321,10 +341,10 @@ def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
 	avg_profit = np.mean(profits) if len(profits) > 0 else 0
 	sharpe = (np.mean(profits) / np.std(profits)) * np.sqrt(252) if np.std(profits) > 0 else 0
 
-	avg_sentiment_win = np.mean([t.get("news_sentiment", 0) for t in trades
-									if "exit" in t and (t["exit"] - t["entry"]) > 0]) if wins.size > 0 else 0
-	avg_sentiment_loss = np.mean([t.get("news_sentiment", 0) for t in trades
-									if "exit" in t and (t["exit"] - t["entry"]) <= 0]) if len(trades) > len(wins) else 0
+	avg_sentiment_win = np.mean([t.get("sentiment", 0) for t in trades
+									if "exit_price" in t and (t["exit_price"] - t["entry_price"]) > 0]) if wins.size > 0 else 0
+	avg_sentiment_loss = np.mean([t.get("sentiment", 0) for t in trades
+									if "exit_price" in t and (t["exit_price"] - t["entry_price"]) <= 0]) if len(trades) > len(wins) else 0
 
 	metrics = {
 		"winrate": round(winrate, 2),
@@ -335,9 +355,9 @@ def calculate_metrics(trades, initial_deposit=settings.DEFAULT_DEPOSIT):
 		"avg_sentiment_loss": round(avg_sentiment_loss, 4)
 	}
 
-	# Логируем метрики для Prometheus/Grafana
+	# Логируем метрики с привязкой к символу
 	for key, value in metrics.items():
-		logger.info("Metrics collected", extra={"metric": key, "value": value})
+		logger.info("Metrics collected", extra={"metric": key, "value": value, "symbol": pair})
 
 	return metrics
 
@@ -349,20 +369,31 @@ async def save_trades_to_db(trades, pair: str, strategy_name: str = "default", u
 			symbol=pair,
 			side=t.get("side", "buy"),
 			amount=t.get("amount", 1.0),
-			price=t["entry"],
+			price=t["entry_price"],
 			status=t["status"],
 			leverage=t.get("leverage", 1.0),
 			user_id=user_id,
-			entry_price=t["entry"],
-			exit_price=t.get("exit"),
-			profit_loss=(
-				((t.get("exit", 0) - t["entry"]) - (t["entry"] * (settings.COMMISSION_RATE + settings.SLIPPAGE_TOLERANCE)))
-				* t.get("amount", 1.0) * t.get("leverage", 1)
-				if "exit" in t else None
-			),
-			news_sentiment=t.get("news_sentiment", 0)
+			entry_price=t["entry_price"],
+			exit_price=t.get("exit_price"),
+			profit_loss=t.get("profit_loss"),
+			news_sentiment=t.get("sentiment", 0)   # 🔹 поле в модели остаётся news_sentiment
 		)
 		await crud.create_trade(session, trade_model)
+
+		# Логируем сохранение сделки
+		logger.info(
+			"Trade saved to DB",
+			extra={
+				"symbol": pair,
+				"strategy": strategy_name,
+				"side": t.get("side", "buy"),
+				"entry_price": t["entry_price"],
+				"exit_price": t.get("exit_price"),
+				"profit_loss": t.get("profit_loss"),
+				"sentiment": t.get("sentiment", 0)
+			}
+		)
+
 
 async def save_metrics_to_db(metrics: dict, pair: str, strategy_name: str = "default", user_id: int = 1, session: AsyncSession = None):
 	report_data = {
@@ -377,6 +408,18 @@ async def save_metrics_to_db(metrics: dict, pair: str, strategy_name: str = "def
 		"user_id": user_id
 	}
 	await crud.create_backtest_report(session, report_data)
+
+	# Логируем сохранение метрик
+	for key, value in metrics.items():
+		logger.info(
+			"Metrics saved to DB",
+			extra={
+				"symbol": pair,
+				"strategy": strategy_name,
+				"metric": key,
+				"value": value
+			}
+		)
 
 
 # --- Визуализация ---
@@ -401,10 +444,10 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: st
 		entry_idx = t.get("entry_index")
 		if entry_idx is not None:
 			plt.axvline(x=entry_idx, color="green", linestyle="--")
-			plt.text(entry_idx, t["entry"], f"x{t.get('leverage',1)}",
+			plt.text(entry_idx, t["entry_price"], f"x{t.get('leverage',1)}",
 						color="black", fontsize=8, rotation=90)
 
-		if "exit" in t:
+		if "exit_price" in t:
 			exit_idx = t.get("exit_index")
 			if exit_idx is not None:
 				plt.axvline(x=exit_idx, color="red", linestyle="--")
@@ -421,12 +464,19 @@ def plot_backtest(data: pd.DataFrame, trades: list, pair: str, strategy_name: st
 	plt.savefig(file_path)
 	plt.close()
 
-	logger.info(f"📊 График сохранён: {file_path}")
+	# Логируем сохранение графика
+	logger.info(
+		"📊 График сохранён",
+		extra={
+			"symbol": pair,
+			"strategy": strategy_name,
+			"file_path": file_path
+		}
+	)
 
 
 # --- Пример запуска ---
 if __name__ == "__main__":
-	# 🔹 Обновляем данные для всех пар перед бэктестом
 	os.makedirs("data", exist_ok=True)
 	for pair in settings.PAIRS:
 		update_csv(symbol=pair, timeframe="1h", days=60, out_dir="data")
@@ -442,7 +492,6 @@ if __name__ == "__main__":
 
 			for pair, strategy_list in strategies.items():
 				df = pd.read_csv(f"data/{pair.replace('/', '')}_1h.csv")
-				# 🔹 Подмешиваем news_sentiment через MLService
 				df = ml_service.prepare_data(df.to_dict("records"), symbol=pair.split("/")[0].lower())
 
 				for strategy in strategy_list:
@@ -450,23 +499,35 @@ if __name__ == "__main__":
 
 					async def run_single_backtest(pair=pair, strategy=strategy, strategy_name=strategy_name, df=df.copy()):
 						try:
-							# ✅ убран лишний аргумент session=session
 							results = await backtest_strategy(df, pair, strategy)
-							metrics = calculate_metrics(results, initial_deposit=settings.DEFAULT_DEPOSIT)
+							metrics = calculate_metrics(results, pair, initial_deposit=settings.DEFAULT_DEPOSIT)
 
 							all_metrics[f"{pair}_{strategy_name}"] = metrics
 							all_results[f"{pair}_{strategy_name}"] = results
 
-							# ✅ Передаём открытую сессию только в функции сохранения
 							await save_trades_to_db(results, pair, strategy_name=strategy_name, session=session)
 							await save_metrics_to_db(metrics, pair, strategy_name=strategy_name, session=session)
 
-							# 🔹 Визуализация только в dev-режиме
 							if getattr(settings, "ENV", "dev") == "dev":
 								plot_backtest(df, results, pair, strategy_name)
 
+							# Логируем успешный бэктест
+							logger.info(
+								"Backtest completed",
+								extra={
+									"symbol": pair,
+									"strategy": strategy_name,
+									"trades_count": len(results),
+									"winrate": metrics["winrate"],
+									"avg_profit": metrics["avg_profit"]
+								}
+							)
+
 						except Exception as e:
-							logger.error(f"❌ Ошибка бэктеста для {pair} ({strategy_name}): {e}")
+							logger.error(
+								f"❌ Ошибка бэктеста для {pair} ({strategy_name}): {e}",
+								extra={"symbol": pair, "strategy": strategy_name}
+							)
 							await crud.create_risk_log(session, {
 								"reason": f"Backtest failed: {e}",
 								"symbol": pair,
@@ -483,7 +544,6 @@ if __name__ == "__main__":
 
 	loop.run_until_complete(run_backtests())
 
-
 	# 🔹 Батч-обучение ML на всех сделках
 	all_trades = []
 	for results in all_results.values():
@@ -491,10 +551,10 @@ if __name__ == "__main__":
 
 	df_all_trades = pd.DataFrame(all_trades)
 	if not df_all_trades.empty:
-		df_all_trades["result"] = (df_all_trades["exit"] - df_all_trades["entry"]).apply(lambda x: 1 if x > 0 else 0)
+		df_all_trades["result"] = (df_all_trades["exit_price"] - df_all_trades["entry_price"]).apply(lambda x: 1 if x > 0 else 0)
 		train_metrics = ml_service.train(df_all_trades, model_type=settings.MODEL_TYPE)
 		ml_service.save_model(settings.MODEL_PATH)
-		logger.info(f"ML обучение завершено на общем датасете: {train_metrics}")
+		logger.info("ML обучение завершено на общем датасете", extra={"train_metrics": train_metrics})
 
 	df_report = pd.DataFrame.from_dict(all_metrics, orient="index")
 	print("\n=== Сводный отчёт по всем парам и стратегиям ===")
@@ -505,6 +565,7 @@ if __name__ == "__main__":
 		from app.utils.export import export_to_excel
 		export_to_excel(all_metrics, all_results)
 		print("\nСводный отчёт сохранён в backtest_summary.xlsx (метрики + сделки)")
+		logger.info("Excel отчёт сохранён", extra={"file": "backtest_summary.xlsx"})
 
 	# ✅ Закрываем брокер после завершения бэктеста
 	loop.run_until_complete(broker.close())

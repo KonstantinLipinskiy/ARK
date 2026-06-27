@@ -1,4 +1,4 @@
-#app/services/indicator_factoty.py
+# app/services/indicator_factory.py
 import pandas as pd
 import inspect
 import asyncio
@@ -37,7 +37,10 @@ class IndicatorFactory:
 		Проверяет, что индикатор поддерживается.
 		"""
 		if name not in cls._registry:
-			logger.error(f"❌ Unsupported indicator requested: {name}")
+			logger.error(
+				f"❌ Unsupported indicator requested: {name}",
+				extra={"operation": "indicator", "collection": name}
+			)
 			raise ValueError(f"❌ Unsupported indicator: {name}. Supported: {cls.supported_indicators()}")
 
 	@classmethod
@@ -47,9 +50,15 @@ class IndicatorFactory:
 		Пример: IndicatorFactory.register("Custom", custom_func)
 		"""
 		if name in cls._registry:
-			logger.warning(f"⚠️ Indicator {name} уже существует и будет перезаписан")
+			logger.warning(
+				f"⚠️ Indicator {name} уже существует и будет перезаписан",
+				extra={"operation": "indicator", "collection": name}
+			)
 		cls._registry[name] = func
-		logger.info(f"✅ Indicator {name} зарегистрирован")
+		logger.info(
+			f"✅ Indicator {name} зарегистрирован",
+			extra={"operation": "indicator", "collection": name}
+		)
 
 	@classmethod
 	def calculate(cls, name: str, **kwargs):
@@ -64,10 +73,16 @@ class IndicatorFactory:
 
 		try:
 			result = func(**kwargs)
-			logger.info(f"✅ Indicator {name} рассчитан | Параметры: {kwargs}")
+			logger.info(
+				f"✅ Indicator {name} рассчитан | Параметры: {kwargs}",
+				extra={"operation": "indicator", "collection": name}
+			)
 			return result
 		except Exception as e:
-			logger.error(f"❌ Error calculating {name}: {e} | Параметры: {kwargs}")
+			logger.error(
+				f"❌ Error calculating {name}: {e} | Параметры: {kwargs}",
+				extra={"operation": "indicator", "collection": name}
+			)
 			raise RuntimeError(f"❌ Error calculating {name}: {e}")
 
 	@classmethod
@@ -83,14 +98,20 @@ class IndicatorFactory:
 
 		try:
 			if inspect.iscoroutinefunction(func):
-					result = await func(**kwargs)
+				result = await func(**kwargs)
 			else:
-					loop = asyncio.get_event_loop()
-					result = await loop.run_in_executor(None, lambda: func(**kwargs))
-			logger.info(f"✅ Indicator {name} рассчитан (async) | Параметры: {kwargs}")
+				loop = asyncio.get_event_loop()
+				result = await loop.run_in_executor(None, lambda: func(**kwargs))
+			logger.info(
+				f"✅ Indicator {name} рассчитан (async) | Параметры: {kwargs}",
+				extra={"operation": "indicator", "collection": name}
+			)
 			return result
 		except Exception as e:
-			logger.error(f"❌ Async error calculating {name}: {e} | Параметры: {kwargs}")
+			logger.error(
+				f"❌ Async error calculating {name}: {e} | Параметры: {kwargs}",
+				extra={"operation": "indicator", "collection": name}
+			)
 			raise RuntimeError(f"❌ Async error calculating {name}: {e}")
 
 	@staticmethod
@@ -101,14 +122,14 @@ class IndicatorFactory:
 		"""
 		for key, value in kwargs.items():
 			if isinstance(value, pd.Series):
-					if value.empty:
-						raise ValueError(f"❌ Series {key} is empty")
-					if value.isna().all():
-						raise ValueError(f"❌ Series {key} contains only NaN")
-					if len(value) < 5:
-						raise ValueError(f"❌ Series {key} too short for calculation")
+				if value.empty:
+					raise ValueError(f"❌ Series {key} is empty")
+				if value.isna().all():
+					raise ValueError(f"❌ Series {key} contains only NaN")
+				if len(value) < 5:
+					raise ValueError(f"❌ Series {key} too short for calculation")
 
 		if "period" in kwargs:
 			period = kwargs["period"]
 			if not isinstance(period, int) or period <= 0:
-					raise ValueError(f"❌ Invalid period value: {period}. Must be int > 0")
+				raise ValueError(f"❌ Invalid period value: {period}. Must be int > 0")

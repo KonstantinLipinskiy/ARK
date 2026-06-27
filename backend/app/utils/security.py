@@ -52,10 +52,12 @@ def decode_jwt_token(token: str) -> dict | None:
 	try:
 		return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 	except jwt.ExpiredSignatureError:
-		logger.warning("⚠️ JWT токен просрочен")
+		logger.warning("⚠️ JWT токен просрочен",
+						extra={"operation": "security", "collection": "jwt"})
 		return None
 	except jwt.InvalidTokenError as e:
-		logger.error(f"❌ Невалидный JWT токен: {e}")
+		logger.error(f"❌ Невалидный JWT токен: {e}",
+						extra={"operation": "security", "collection": "jwt"})
 		return None
 
 # 🔹 Получение текущего пользователя
@@ -63,14 +65,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 	token = credentials.credentials
 	payload = decode_jwt_token(token)
 	if not payload:
-		logger.warning("❌ Unauthorized access attempt (invalid/expired token)")
+		logger.warning("❌ Unauthorized access attempt (invalid/expired token)",
+						extra={"operation": "security", "collection": "auth"})
 		raise HTTPException(status_code=401, detail="Unauthorized")
 
 	user_id = payload.get("user_id")
 	role = payload.get("role")
 
 	if not user_id or not role:
-		logger.warning("❌ Unauthorized access attempt (no user_id/role in token)")
+		logger.warning("❌ Unauthorized access attempt (no user_id/role in token)",
+						extra={"operation": "security", "collection": "auth"})
 		raise HTTPException(status_code=401, detail="Unauthorized")
 
 	return {"user_id": user_id, "role": role}
@@ -80,19 +84,23 @@ async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(
 	token = credentials.credentials
 	payload = decode_jwt_token(token)
 	if not payload:
-		logger.warning("❌ Unauthorized admin access attempt (invalid/expired token)")
+		logger.warning("❌ Unauthorized admin access attempt (invalid/expired token)",
+						extra={"operation": "security", "collection": "auth"})
 		raise HTTPException(status_code=401, detail="Unauthorized")
 
 	user_id = payload.get("user_id")
 	role = payload.get("role")
 
 	if not user_id or not role:
-		logger.warning("❌ Unauthorized admin access attempt (no user_id/role in token)")
+		logger.warning("❌ Unauthorized admin access attempt (no user_id/role in token)",
+						extra={"operation": "security", "collection": "auth"})
 		raise HTTPException(status_code=401, detail="Unauthorized")
 
 	if role != "admin":
-		logger.error(f"🚫 User {user_id} with role '{role}' tried to access admin endpoint")
+		logger.error(f"🚫 User {user_id} with role '{role}' tried to access admin endpoint",
+						extra={"operation": "security", "collection": "auth"})
 		raise HTTPException(status_code=403, detail="Admin privileges required")
 
-	logger.info(f"✅ Admin {user_id} успешно получил доступ")
+	logger.info(f"✅ Admin {user_id} успешно получил доступ",
+				extra={"operation": "security", "collection": "auth"})
 	return {"user_id": user_id, "role": role}

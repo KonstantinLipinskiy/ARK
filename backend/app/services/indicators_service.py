@@ -1,4 +1,4 @@
-#app/services/indicators_service.py
+# app/services/indicators_service.py
 import asyncio
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,9 +20,10 @@ class IndicatorsService:
 		self.db_session = db_session
 		self.redis = redis
 
-	async def calculate_and_store(self, pair: str, indicator_name: str, **kwargs):
+	async def calculate_and_store(self, pair: str, indicator_name: str, task_id: str | None = None, **kwargs):
 		"""
 		Асинхронный расчёт индикатора и сохранение результата в БД + Redis.
+		Теперь обновляет статус задачи в Redis (done/error).
 		"""
 		try:
 			self._validate_inputs(kwargs)
@@ -33,11 +34,22 @@ class IndicatorsService:
 
 			await self._publish_to_redis(pair, indicator_name, result)
 
-			logger.info(f"✅ Indicator {indicator_name} успешно рассчитан и сохранён | Параметры: {kwargs}")
+			if task_id:
+				await self.redis.set_task_status(task_id, "done")
+
+			logger.info(
+				f"✅ Indicator {indicator_name} успешно рассчитан и сохранён | Параметры: {kwargs}",
+				extra={"operation": "indicators_service", "collection": indicator_name}
+			)
 			return result
 
 		except Exception as e:
-			logger.error(f"❌ Error in IndicatorsService.calculate_and_store: {e} | Параметры: {kwargs}")
+			logger.error(
+				f"❌ Error in IndicatorsService.calculate_and_store: {e} | Параметры: {kwargs}",
+				extra={"operation": "indicators_service", "collection": indicator_name}
+			)
+			if task_id:
+				await self.redis.set_task_status(task_id, "error")
 			return None
 
 	async def _save_to_db(self, pair: str, indicator_name: str, result, retries: int = 2):
@@ -48,38 +60,50 @@ class IndicatorsService:
 		attempt = 0
 		while attempt <= retries:
 			try:
-					if isinstance(result, tuple):
-						values = []
-						for idx, res in enumerate(result):
-							val = res.iloc[-1] if isinstance(res, pd.Series) else str(res)
-							indicator = IndicatorORM(
-									pair=pair,
-									name=f"{indicator_name}_{idx}",
-									value=str(val)
-							)
-							self.db_session.add(indicator)
-							values.append(val)
-						await self.db_session.commit()
-						logger.info(f"✅ DB save: {indicator_name} → {values}")
-					else:
-						value = result.iloc[-1] if isinstance(result, pd.Series) else str(result)
+				if isinstance(result, tuple):
+					values = []
+					for idx, res in enumerate(result):
+						val = res.iloc[-1] if isinstance(res, pd.Series) else str(res)
 						indicator = IndicatorORM(
 							pair=pair,
-							name=indicator_name,
-							value=str(value)
+							name=f"{indicator_name}_{idx}",
+							value=str(val)
 						)
 						self.db_session.add(indicator)
-						await self.db_session.commit()
-						logger.info(f"✅ DB save: {indicator_name} → {value}")
-					return
+						values.append(val)
+					await self.db_session.commit()
+					logger.info(
+						f"✅ DB save: {indicator_name} → {values}",
+						extra={"operation": "indicators_service", "collection": indicator_name}
+					)
+				else:
+					value = result.iloc[-1] if isinstance(result, pd.Series) else str(result)
+					indicator = IndicatorORM(
+						pair=pair,
+						name=indicator_name,
+						value=str(value)
+					)
+					self.db_session.add(indicator)
+					await self.db_session.commit()
+					logger.info(
+						f"✅ DB save: {indicator_name} → {value}",
+						extra={"operation": "indicators_service", "collection": indicator_name}
+					)
+				return
 			except Exception as e:
-					logger.error(f"❌ DB save error (attempt {attempt+1}): {e}")
-					await self.db_session.rollback()
-					attempt += 1
-					if attempt > retries:
-						logger.error(f"❌ DB save failed after {retries+1} attempts for {indicator_name}")
-						return
-					await asyncio.sleep(1) 
+				logger.error(
+					f"❌ DB save error (attempt {attempt+1}): {e}",
+					extra={"operation": "indicators_service", "collection": indicator_name}
+				)
+				await self.db_session.rollback()
+				attempt += 1
+				if attempt > retries:
+					logger.error(
+						f"❌ DB save failed after {retries+1} attempts for {indicator_name}",
+						extra={"operation": "indicators_service", "collection": indicator_name}
+					)
+					return
+				await asyncio.sleep(1)
 
 	async def _publish_to_redis(self, pair: str, indicator_name: str, result, retries: int = 2):
 		"""
@@ -89,35 +113,44 @@ class IndicatorsService:
 		attempt = 0
 		while attempt <= retries:
 			try:
-					if isinstance(result, tuple):
-						payload = {
-							"pair": pair,
-							"indicator": indicator_name,
-							"result": [
-									res.tail(1).to_dict() if isinstance(res, pd.Series) else str(res)
-									for res in result
-							]
-						}
-					else:
-						payload = {
-							"pair": pair,
-							"indicator": indicator_name,
-							"result": (
-									result.tail(1).to_dict()
-									if isinstance(result, pd.Series)
-									else str(result)
-							)
-						}
-					await self.redis.publish("indicators", payload)
-					logger.info(f"✅ Redis publish: {indicator_name} → {payload}")
-					return
+				if isinstance(result, tuple):
+					payload = {
+						"pair": pair,
+						"indicator": indicator_name,
+						"result": [
+							res.tail(1).to_dict() if isinstance(res, pd.Series) else str(res)
+							for res in result
+						]
+					}
+				else:
+					payload = {
+						"pair": pair,
+						"indicator": indicator_name,
+						"result": (
+							result.tail(1).to_dict()
+							if isinstance(result, pd.Series)
+							else str(result)
+						)
+					}
+				await self.redis.publish("indicators", payload)
+				logger.info(
+					f"✅ Redis publish: {indicator_name} → {payload}",
+					extra={"operation": "indicators_service", "collection": indicator_name}
+				)
+				return
 			except Exception as e:
-					logger.error(f"❌ Redis publish error (attempt {attempt+1}): {e}")
-					attempt += 1
-					if attempt > retries:
-						logger.error(f"❌ Redis publish failed after {retries+1} attempts for {indicator_name}")
-						return
-					await asyncio.sleep(1)
+				logger.error(
+					f"❌ Redis publish error (attempt {attempt+1}): {e}",
+					extra={"operation": "indicators_service", "collection": indicator_name}
+				)
+				attempt += 1
+				if attempt > retries:
+					logger.error(
+						f"❌ Redis publish failed after {retries+1} attempts for {indicator_name}",
+						extra={"operation": "indicators_service", "collection": indicator_name}
+					)
+					return
+				await asyncio.sleep(1)
 
 	def _validate_inputs(self, kwargs: dict):
 		"""
@@ -125,14 +158,14 @@ class IndicatorsService:
 		"""
 		for key, value in kwargs.items():
 			if isinstance(value, pd.Series):
-					if value.empty:
-						raise ValueError(f"❌ Series {key} is empty")
-					if value.isna().all():
-						raise ValueError(f"❌ Series {key} contains only NaN")
-					if len(value) < 5:
-						raise ValueError(f"❌ Series {key} too short for calculation")
+				if value.empty:
+					raise ValueError(f"❌ Series {key} is empty")
+				if value.isna().all():
+					raise ValueError(f"❌ Series {key} contains only NaN")
+				if len(value) < 5:
+					raise ValueError(f"❌ Series {key} too short for calculation")
 
 		if "period" in kwargs:
 			period = kwargs["period"]
 			if not isinstance(period, int) or period <= 0:
-					raise ValueError(f"❌ Invalid period value: {period}. Must be int > 0")
+				raise ValueError(f"❌ Invalid period value: {period}. Must be int > 0")

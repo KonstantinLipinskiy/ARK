@@ -1,4 +1,4 @@
-#app/services/telegram_worker.py
+# app/services/telegram_worker.py
 import os
 import asyncio
 from aiogram import Bot
@@ -28,7 +28,8 @@ async def process_notification(payload: dict):
 	Обработка уведомления из очереди RabbitMQ.
 	payload: dict (RabbitMQ уже возвращает JSON-декодированный объект)
 	"""
-	logger.info(f"📨 Telegram worker получил сообщение: {payload}")
+	logger.info(f"📨 Telegram worker получил сообщение: {payload}",
+				extra={"operation": "telegram_worker", "collection": "notifications"})
 	try:
 		text = payload.get("text", "")
 		msg_type = payload.get("type", "info")
@@ -81,7 +82,7 @@ async def process_notification(payload: dict):
 			report_name = payload.get("report_name", "Отчёт")
 			trades = payload.get("trades", [])
 			# 🔹 Используем ReportsService для форматированного отчёта
-			summary = reports_service.generate_rag_report(trades, output_format="markdown")
+			summary = reports_service.generate_report(trades, output_format="markdown")
 			text = (
 				f"📑 Новый отчёт: {report_name}\n"
 				f"{summary}"
@@ -107,27 +108,34 @@ async def process_notification(payload: dict):
 			user = await get_user_by_id(user_id)
 			if user and user.telegram_id:
 				if user.settings and not user.settings.get("notifications_enabled", True):
-					logger.info(f"🔕 Уведомления отключены для пользователя {user.username}")
+					logger.info(f"🔕 Уведомления отключены для пользователя {user.username}",
+								extra={"operation": "telegram_worker", "collection": "send"})
 					return
 				try:
 					await bot.send_message(chat_id=user.telegram_id, text=text)
-					logger.info(f"📤 Уведомление отправлено пользователю {user.username} ({user.telegram_id})")
+					logger.info(f"📤 Уведомление отправлено пользователю {user.username} ({user.telegram_id})",
+								extra={"operation": "telegram_worker", "collection": "send"})
 				except Exception as e:
-					logger.error(f"❌ Ошибка отправки сообщения пользователю {user.username}: {e}")
+					logger.error(f"❌ Ошибка отправки сообщения пользователю {user.username}: {e}",
+									extra={"operation": "telegram_worker", "collection": "send"})
 			else:
-				logger.warning(f"❌ Пользователь {user_id} не найден или нет telegram_id")
+				logger.warning(f"❌ Пользователь {user_id} не найден или нет telegram_id",
+								extra={"operation": "telegram_worker", "collection": "send"})
 		else:
 			# fallback: если user_id не указан, можно отправить в общий чат (например, админский)
 			default_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 			if default_chat_id:
 				try:
 					await bot.send_message(chat_id=default_chat_id, text=text)
-					logger.info(f"📤 Уведомление отправлено в общий чат {default_chat_id}")
+					logger.info(f"📤 Уведомление отправлено в общий чат {default_chat_id}",
+								extra={"operation": "telegram_worker", "collection": "send"})
 				except Exception as e:
-					logger.error(f"❌ Ошибка отправки сообщения в общий чат {default_chat_id}: {e}")
+					logger.error(f"❌ Ошибка отправки сообщения в общий чат {default_chat_id}: {e}",
+									extra={"operation": "telegram_worker", "collection": "send"})
 
 	except Exception as e:
-		logger.error(f"❌ Ошибка обработки уведомления: {e}")
+		logger.error(f"❌ Ошибка обработки уведомления: {e}",
+						extra={"operation": "telegram_worker", "collection": "processing"})
 		# публикуем ошибку в alerts_queue
 		await broker.publish_alert({"type": "telegram_error", "error": str(e), "payload": payload})
 
@@ -141,13 +149,15 @@ async def consume_notifications():
 	await broker.consume_logs(process_notification)
 
 async def main():
-	logger.info("🚀 Запуск Telegram воркера...")
+	logger.info("🚀 Запуск Telegram воркера...",
+				extra={"operation": "telegram_worker", "collection": "lifecycle"})
 	try:
 		await consume_notifications()
 	finally:
 		await broker.close()
 		await bot.session.close()
-		logger.info("🔌 Telegram воркер остановлен")
+		logger.info("🔌 Telegram воркер остановлен",
+					extra={"operation": "telegram_worker", "collection": "lifecycle"})
 
 if __name__ == "__main__":
 	asyncio.run(main())

@@ -41,9 +41,11 @@ class RiskService:
 			self.STRATEGY_CONFIG = await load_strategies(self.db_session)
 			self.RISK_CONFIG = await load_risk_settings(self.db_session)
 			self._user_risk_cache.clear()
-			logger.info("♻️ RiskService configs refreshed")
+			logger.info("♻️ RiskService configs refreshed", extra={"operation": "risk_service", "collection": "configs"})
+
 		except Exception as e:
-			logger.error(f"❌ Failed to refresh configs: {e}")
+			logger.error(f"❌ Failed to refresh configs: {e}", extra={"operation": "risk_service", "collection": "configs"})
+
 
 	# --- Новый метод для Telegram ---
 	async def get_limits(self, user_id: int | None = None) -> dict:
@@ -70,10 +72,12 @@ class RiskService:
 			record = FundingRateORM(symbol=symbol, rate=funding["fundingRate"], timestamp=funding["timestamp"])
 			self.db_session.add(record)
 			await self.db_session.commit()
-			logger.info(f"✅ Funding rate saved | {symbol} | rate={funding['fundingRate']} | ts={funding['timestamp']}")
+			logger.info(f"✅ Funding rate saved | {symbol} | rate={funding['fundingRate']} | ts={funding['timestamp']}", extra={"operation": "risk_service", "collection": "funding"})
+
 			return record
 		except Exception as e:
-			logger.error(f"❌ Failed to save funding rate for {symbol}: {e}")
+			logger.error(f"❌ Failed to save funding rate for {symbol}: {e}", extra={"operation": "risk_service", "collection": "funding"})
+
 			return {"error": str(e)}
 
 	# --- LIQUIDATION RISK ---
@@ -86,11 +90,13 @@ class RiskService:
 			mark_price = mark["markPrice"]
 			liquidation_threshold = entry_price * (1 - 1 / leverage)
 			if mark_price <= liquidation_threshold:
-				logger.warning(f"⚠️ {symbol} близко к ликвидации | Mark={mark_price} | Entry={entry_price} | Lev={leverage} | Threshold={liquidation_threshold}")
+				logger.warning(f"⚠️ {symbol} близко к ликвидации | Mark={mark_price} | Entry={entry_price} | Lev={leverage} | Threshold={liquidation_threshold}", extra={"operation": "risk_service", "collection": "liquidation"})
+
 				return True
 			return False
 		except Exception as e:
-			logger.error(f"❌ Liquidation risk check failed for {symbol}: {e}")
+			logger.error(f"❌ Liquidation risk check failed for {symbol}: {e}", extra={"operation": "risk_service", "collection": "liquidation"})
+
 			return False
 
 	async def get_user_risk_config(self, user_id: int) -> dict:
@@ -112,7 +118,8 @@ class RiskService:
 			self._user_risk_cache[user_id] = config
 			return config
 		except Exception as e:
-			logger.error(f"❌ Failed to load user risk profile for user_id={user_id}: {e}")
+			logger.error(f"❌ Failed to load user risk profile for user_id={user_id}: {e}", extra={"operation": "risk_service", "collection": "user_profile"})
+
 			return self.RISK_CONFIG
 
 	async def _get_pair_performance(self, symbol: str) -> float:
@@ -127,15 +134,18 @@ class RiskService:
 			)
 			total_trades, total_profit, wins = result.first()
 			if not total_trades or total_trades < 30:
-				logger.info(f"ℹ️ Недостаточно данных для {symbol}: trades={total_trades}")
+				logger.info(f"ℹ️ Недостаточно данных для {symbol}: trades={total_trades}", extra={"operation": "risk_service", "collection": "performance"})
+
 				return 1.0
 			winrate = wins / total_trades
 			avg_profit = (total_profit / total_trades) if total_trades else 0
 			performance_factor = max(0.5, min(2.0, winrate * (1 + avg_profit)))
-			logger.debug(f"📊 Performance factor calculated | {symbol} | trades={total_trades} | winrate={winrate:.2f} | avg_profit={avg_profit:.4f} | factor={performance_factor:.2f}")
+			logger.debug(f"📊 Performance factor calculated | {symbol} | trades={total_trades} | winrate={winrate:.2f} | avg_profit={avg_profit:.4f} | factor={performance_factor:.2f}", extra={"operation": "risk_service", "collection": "performance"})
+
 			return performance_factor
 		except Exception as e:
-			logger.error(f"❌ Failed to calculate performance for {symbol}: {e}")
+			logger.error(f"❌ Failed to calculate performance for {symbol}: {e}", extra={"operation": "risk_service", "collection": "performance"})
+
 			return 1.0
 
 
@@ -176,7 +186,7 @@ class RiskService:
 		if symbol not in self.STRATEGY_CONFIG:
 			await self.refresh_config()
 			if symbol not in self.STRATEGY_CONFIG:
-				logger.error(f"❌ Strategy config not found for {symbol}")
+				logger.error(f"❌ Strategy config not found for {symbol}", extra={"operation": "risk_service", "collection": "validation"})
 				return 0.0
 
 		base_allocation = self.STRATEGY_CONFIG[symbol].get("allocation_percent", 0.05)
@@ -389,7 +399,8 @@ class RiskService:
 				}
 			)
 		except Exception as e:
-			logger.error(f"❌ Failed to log violation | reason={reason} | symbol={symbol} | error={e}")
+			logger.error(f"❌ Failed to log violation | reason={reason} | symbol={symbol} | error={e}", extra={"operation": "risk_service", "collection": "violation"})
+
 
 
 	async def _safe_publish(self, message: dict) -> bool:
@@ -417,13 +428,16 @@ class RiskService:
 					delay = base_delay * (2 ** attempt)  # экспоненциальная задержка: 1s → 2s → 4s
 					logger.error(
 						f"Broker publish failed (attempt {attempt+1}/{retries}) | "
-						f"type={message.get('type')} | error={e} | retry in {delay}s"
+						f"type={message.get('type')} | error={e} | retry in {delay}s",
+						extra={"operation": "risk_service", "collection": "broker"}
 					)
+
 					await asyncio.sleep(delay)
 				else:
 					logger.critical(
 						f"Broker publish retry failed after {retries+1} attempts | "
-						f"type={message.get('type')} | error={e}"
+						f"type={message.get('type')} | error={e}",
+						extra={"operation": "risk_service", "collection": "broker"}
 					)
 					return False
 
@@ -586,7 +600,7 @@ class RiskService:
 			return True
 
 		except Exception as e:
-			logger.error(f"❌ Risk validation error: {e}")
+			logger.error(f"❌ Risk validation error: {e}",extra={"operation": "risk_service", "collection": "validation"})
 			await self._safe_publish({
 				"type": "error",
 				"user_id": user_id,

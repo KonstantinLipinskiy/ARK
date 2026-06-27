@@ -57,11 +57,13 @@ async def create_trade(db: AsyncSession, trade: Trade) -> schemas.TradeORM:
 
 	except IntegrityError as e:
 		await db.rollback()
-		logger.error(f"Ошибка уникальности при создании сделки: {e}")
+		logger.error(f"Ошибка уникальности при создании сделки: {e}",
+						extra={"operation": "crud", "collection": "trades"})
 		raise
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка БД при создании сделки: {e}")
+		logger.error(f"Ошибка БД при создании сделки: {e}",
+						extra={"operation": "crud", "collection": "trades"})
 		raise
 
 
@@ -155,14 +157,14 @@ async def update_trade(db: AsyncSession, trade_id: int, updates: dict):
 			if db_trade.entry_price and db_trade.exit_price:
 				db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
 
-
 	try:
 		await db.commit()
 		await db.refresh(db_trade)
 		return db_trade
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка обновления сделки: {e}")
+		logger.error(f"Ошибка обновления сделки: {e}",
+						extra={"operation": "crud", "collection": "trades"})
 		raise
 
 
@@ -192,14 +194,14 @@ async def patch_trade(db: AsyncSession, trade_id: int, updates: dict):
 			if db_trade.entry_price and db_trade.exit_price:
 				db_trade.profit_loss = (db_trade.exit_price - db_trade.entry_price) * db_trade.amount * db_trade.leverage
 
-
 	try:
 		await db.commit()
 		await db.refresh(db_trade)
 		return db_trade
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка PATCH обновления сделки: {e}")
+		logger.error(f"Ошибка PATCH обновления сделки: {e}",
+						extra={"operation": "crud", "collection": "trades"})
 		raise
 
 
@@ -214,7 +216,8 @@ async def delete_trade(db: AsyncSession, trade_id: int):
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления сделки: {e}")
+		logger.error(f"Ошибка удаления сделки: {e}",
+						extra={"operation": "crud", "collection": "trades"})
 		raise
 
 
@@ -234,7 +237,8 @@ async def close_trade(db: AsyncSession, trade_id: int, exit_price: float):
 		return db_trade
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка закрытия сделки: {e}")
+		logger.error(f"Ошибка закрытия сделки: {e}",
+						extra={"operation": "crud", "collection": "trades"})
 		raise
 
 
@@ -252,8 +256,10 @@ async def cancel_trade(db: AsyncSession, trade_id: int, reason: str = "Cancelled
 		return db_trade
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка отмены сделки: {e}")
+		logger.error(f"Ошибка отмены сделки: {e}",
+						extra={"operation": "crud", "collection": "trades"})
 		raise
+
 
 # ---------- Backtest Reports ----------
 async def create_backtest_report(db: AsyncSession, report_data: dict) -> schemas.BacktestReport:
@@ -276,7 +282,8 @@ async def create_backtest_report(db: AsyncSession, report_data: dict) -> schemas
 		return report
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка создания отчёта бэктеста: {e}")
+		logger.error(f"Ошибка создания отчёта бэктеста: {e}",
+						extra={"operation": "crud", "collection": "reports"})
 		raise
 
 
@@ -318,7 +325,8 @@ async def create_signal(db: AsyncSession, signal: Signal) -> schemas.SignalORM:
 		return db_signal
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка создания сигнала: {e}")
+		logger.error(f"Ошибка создания сигнала: {e}",
+						extra={"operation": "crud", "collection": "signals"})
 		raise
 
 
@@ -393,7 +401,8 @@ async def update_signal(db: AsyncSession, signal_id: int, updates: dict):
 		return db_signal
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка обновления сигнала: {e}")
+		logger.error(f"Ошибка обновления сигнала: {e}",
+						extra={"operation": "crud", "collection": "signals"})
 		raise
 
 
@@ -424,7 +433,8 @@ async def patch_signal(db: AsyncSession, signal_id: int, updates: dict):
 		return db_signal
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка PATCH обновления сигнала: {e}")
+		logger.error(f"Ошибка PATCH обновления сигнала: {e}",
+						extra={"operation": "crud", "collection": "signals"})
 		raise
 
 
@@ -439,7 +449,8 @@ async def delete_signal(db: AsyncSession, signal_id: int):
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления сигнала: {e}")
+		logger.error(f"Ошибка удаления сигнала: {e}",
+						extra={"operation": "crud", "collection": "signals"})
 		raise
 
 
@@ -471,12 +482,15 @@ async def create_user(db: AsyncSession, user: UserCreate) -> schemas.UserORM:
 		return db_user
 	except IntegrityError as e:
 		await db.rollback()
-		logger.error(f"Ошибка уникальности при создании пользователя: {e}")
+		logger.error(f"Ошибка уникальности при создании пользователя: {e}",
+						extra={"operation": "crud", "collection": "users"})
 		raise
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка создания пользователя: {e}")
+		logger.error(f"Ошибка создания пользователя: {e}",
+						extra={"operation": "crud", "collection": "users"})
 		raise
+
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> schemas.UserORM | None:
 	"""Получить пользователя по ID."""
@@ -535,7 +549,8 @@ async def update_user_status(db: AsyncSession, user_id: int, status: str) -> sch
 		return db_user
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка обновления статуса пользователя: {e}")
+		logger.error(f"Ошибка обновления статуса пользователя: {e}",
+						extra={"operation": "crud", "collection": "users"})
 		raise
 
 
@@ -568,7 +583,8 @@ async def update_user(db: AsyncSession, user_id: int, updates: UserUpdate) -> sc
 		return db_user
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка обновления пользователя: {e}")
+		logger.error(f"Ошибка обновления пользователя: {e}",
+						extra={"operation": "crud", "collection": "users"})
 		raise
 
 
@@ -584,7 +600,8 @@ async def delete_user(db: AsyncSession, user_id: int) -> bool:
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления пользователя: {e}")
+		logger.error(f"Ошибка удаления пользователя: {e}",
+						extra={"operation": "crud", "collection": "users"})
 		raise
 
 
@@ -599,8 +616,10 @@ async def save_indicator(db: AsyncSession, pair: str, name: str, value: str) -> 
 		return indicator
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка сохранения индикатора: {e}")
+		logger.error(f"Ошибка сохранения индикатора: {e}",
+						extra={"operation": "crud", "collection": "indicators"})
 		raise
+
 
 async def get_indicator_by_id(db: AsyncSession, indicator_id: int) -> schemas.IndicatorORM | None:
 	"""Получить индикатор по его ID."""
@@ -649,7 +668,8 @@ async def delete_indicator(db: AsyncSession, indicator_id: int):
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления индикатора: {e}")
+		logger.error(f"Ошибка удаления индикатора: {e}",
+						extra={"operation": "crud", "collection": "indicators"})
 		raise
 
 
@@ -708,6 +728,7 @@ async def get_strategy_by_symbol(db: AsyncSession, symbol: str):
 	result = await db.execute(select(schemas.StrategyORM).filter(schemas.StrategyORM.symbol == symbol))
 	return result.scalars().first()
 
+
 async def update_strategy(db: AsyncSession, symbol: str, updates: dict):
 	result = await db.execute(select(schemas.StrategyORM).filter(schemas.StrategyORM.symbol == symbol))
 	strategy = result.scalars().first()
@@ -739,7 +760,8 @@ async def update_strategy(db: AsyncSession, symbol: str, updates: dict):
 		return strategy
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка обновления стратегии: {e}")
+		logger.error(f"Ошибка обновления стратегии: {e}",
+						extra={"operation": "crud", "collection": "strategies"})
 		raise
 
 
@@ -754,12 +776,18 @@ async def delete_strategy(db: AsyncSession, symbol: str):
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления стратегии: {e}")
+		logger.error(f"Ошибка удаления стратегии: {e}",
+						extra={"operation": "crud", "collection": "strategies"})
 		raise
 
 
 # ---------- Refresh Tokens ----------
-async def create_refresh_token(db: AsyncSession, user_id: int, token: str, expires_at: datetime) -> schemas.RefreshTokenORM:
+async def create_refresh_token(
+	db: AsyncSession,
+	user_id: int,
+	token: str,
+	expires_at: datetime
+	) -> schemas.RefreshTokenORM:
 	"""Сохранить refresh токен в БД."""
 	try:
 		db_token = schemas.RefreshTokenORM(
@@ -773,17 +801,22 @@ async def create_refresh_token(db: AsyncSession, user_id: int, token: str, expir
 		return db_token
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка сохранения refresh токена: {e}")
+		logger.error(f"Ошибка сохранения refresh токена: {e}",
+						extra={"operation": "crud", "collection": "refresh_tokens"})
 		raise
+
 
 async def get_refresh_token(db: AsyncSession, token: str) -> schemas.RefreshTokenORM | None:
 	"""Получить refresh токен по строке токена."""
 	result = await db.execute(select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.token == token))
 	return result.scalars().first()
 
+
 async def delete_refresh_token(db: AsyncSession, token: str) -> bool:
 	"""Удалить refresh токен по строке токена."""
-	result = await db.execute(select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.token == token))
+	result = await db.execute(
+		select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.token == token)
+	)
 	db_token = result.scalars().first()
 	if not db_token:
 		return False
@@ -793,12 +826,16 @@ async def delete_refresh_token(db: AsyncSession, token: str) -> bool:
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления refresh токена: {e}")
+		logger.error(f"Ошибка удаления refresh токена: {e}",
+						extra={"operation": "crud", "collection": "refresh_tokens"})
 		raise
+
 
 async def delete_tokens_by_user(db: AsyncSession, user_id: int) -> bool:
 	"""Удалить все refresh токены пользователя (например, при logout)."""
-	result = await db.execute(select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.user_id == user_id))
+	result = await db.execute(
+		select(schemas.RefreshTokenORM).filter(schemas.RefreshTokenORM.user_id == user_id)
+	)
 	tokens = result.scalars().all()
 	if not tokens:
 		return False
@@ -809,12 +846,20 @@ async def delete_tokens_by_user(db: AsyncSession, user_id: int) -> bool:
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления refresh токенов пользователя: {e}")
+		logger.error(f"Ошибка удаления refresh токенов пользователя: {e}",
+						extra={"operation": "crud", "collection": "refresh_tokens"})
 		raise
 
 
 # ---------- News ----------
-async def create_news(db: AsyncSession, symbol: str, title: str, content: str, source: str, published_at: datetime):
+async def create_news(
+	db: AsyncSession,
+	symbol: str,
+	title: str,
+	content: str,
+	source: str,
+	published_at: datetime
+	):
 	"""Создать новость и сохранить в БД."""
 	try:
 		db_news = schemas.NewsORM(
@@ -830,7 +875,8 @@ async def create_news(db: AsyncSession, symbol: str, title: str, content: str, s
 		return db_news
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка создания новости: {e}")
+		logger.error(f"Ошибка создания новости: {e}",
+						extra={"operation": "crud", "collection": "news"})
 		raise
 
 
@@ -880,12 +926,13 @@ async def delete_news(db: AsyncSession, news_id: int):
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления новости: {e}")
+		logger.error(f"Ошибка удаления новости: {e}",
+						extra={"operation": "crud", "collection": "news"})
 		raise
 
 
 async def delete_old_news(db: AsyncSession, days: int = 30):
-	"""Удалить новости старше N дней (например, чистка старых записей)"""
+	"""Удалить новости старше N дней (например, чистка старых записей)."""
 	cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 	result = await db.execute(
 		select(schemas.NewsORM).filter(schemas.NewsORM.published_at < cutoff)
@@ -900,7 +947,8 @@ async def delete_old_news(db: AsyncSession, days: int = 30):
 		return len(old_news)
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления старых новостей: {e}")
+		logger.error(f"Ошибка удаления старых новостей: {e}",
+						extra={"operation": "crud", "collection": "news"})
 		raise
 
 
@@ -915,12 +963,15 @@ async def create_ml_model(db: AsyncSession, model_data: dict) -> schemas.MLModel
 		return ml_model
 	except IntegrityError as e:
 		await db.rollback()
-		logger.error(f"Ошибка уникальности при создании ML модели: {e}")
+		logger.error(f"Ошибка уникальности при создании ML модели: {e}",
+						extra={"operation": "crud", "collection": "ml_models"})
 		raise
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка БД при создании ML модели: {e}")
+		logger.error(f"Ошибка БД при создании ML модели: {e}",
+						extra={"operation": "crud", "collection": "ml_models"})
 		raise
+
 
 async def get_ml_model_by_name(db: AsyncSession, name: str) -> schemas.MLModelORM | None:
 	"""Получить ML модель по имени."""
@@ -951,8 +1002,10 @@ async def update_ml_model(db: AsyncSession, model_id: int, updates: dict) -> sch
 		return ml_model
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка обновления ML модели: {e}")
+		logger.error(f"Ошибка обновления ML модели: {e}",
+						extra={"operation": "crud", "collection": "ml_models"})
 		raise
+
 
 async def delete_ml_model(db: AsyncSession, model_id: int) -> bool:
 	"""Удалить ML модель по ID."""
@@ -966,7 +1019,8 @@ async def delete_ml_model(db: AsyncSession, model_id: int) -> bool:
 		return True
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка удаления ML модели: {e}")
+		logger.error(f"Ошибка удаления ML модели: {e}",
+						extra={"operation": "crud", "collection": "ml_models"})
 		raise
 
 
@@ -1002,7 +1056,8 @@ async def update_risk_settings(db: AsyncSession, updates: dict) -> schemas.RiskS
 		return settings_obj
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка обновления risk_settings: {e}")
+		logger.error(f"Ошибка обновления risk_settings: {e}",
+						extra={"operation": "crud", "collection": "risk_settings"})
 		return None
 
 
@@ -1025,8 +1080,10 @@ async def create_risk_log(db: AsyncSession, log_data: dict) -> schemas.RiskLog:
 		return risk_log
 	except SQLAlchemyError as e:
 		await db.rollback()
-		logger.error(f"Ошибка создания RiskLog: {e}")
+		logger.error(f"Ошибка создания RiskLog: {e}",
+						extra={"operation": "crud", "collection": "risk_logs"})
 		raise
+
 
 async def get_risk_logs(
 	db: AsyncSession,
@@ -1067,6 +1124,7 @@ async def get_risk_logs(
 		"page": skip // limit + 1,
 		"page_size": limit
 	}
+
 
 async def get_backtest_reports_paginated(
 	db: AsyncSession,

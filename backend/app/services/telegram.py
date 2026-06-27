@@ -1,4 +1,4 @@
-#app/services/telegram.py
+# app/services/telegram.py
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from sqlalchemy import select
@@ -27,28 +27,34 @@ class TelegramService:
 		"""Универсальная отправка сообщения (по умолчанию админу) через брокер."""
 		target_id = telegram_id or getattr(settings, "ADMIN_TELEGRAM_ID", None)
 		if not target_id:
-			logger.error("❌ ADMIN_TELEGRAM_ID не задан")
+			logger.error("❌ ADMIN_TELEGRAM_ID не задан",
+							extra={"operation": "telegram_service", "collection": "config"})
 			return
 		payload = {"type": "info", "text": text, "user_id": None}
 		await broker.publish_telegram(payload)
-		logger.info(f"📤 Сообщение отправлено в очередь Telegram: {text}")
+		logger.info(f"📤 Сообщение отправлено в очередь Telegram: {text}",
+					extra={"operation": "telegram_service", "collection": "send"})
 
 	async def send_message_to_user(self, user: UserORM, text: str):
 		"""Отправка сообщения конкретному пользователю через брокер."""
 		if not user.telegram_id:
-			logger.warning(f"❌ У пользователя {user.username} нет telegram_id")
+			logger.warning(f"❌ У пользователя {user.username} нет telegram_id",
+							extra={"operation": "telegram_service", "collection": "send"})
 			return
 		if user.settings and not user.settings.get("notifications_enabled", True):
-			logger.info(f"🔕 Уведомления отключены для пользователя {user.username}")
+			logger.info(f"🔕 Уведомления отключены для пользователя {user.username}",
+						extra={"operation": "telegram_service", "collection": "send"})
 			return
 		payload = {"type": "info", "text": text, "user_id": user.id}
 		await broker.publish_telegram(payload)
-		logger.info(f"📤 Сообщение отправлено в очередь Telegram для {user.username}")
+		logger.info(f"📤 Сообщение отправлено в очередь Telegram для {user.username}",
+					extra={"operation": "telegram_service", "collection": "send"})
 
 	async def send_message_by_id(self, telegram_id: str, text: str):
 		"""Отправка сообщения по telegram_id напрямую через брокер."""
 		if not telegram_id:
-			logger.error("❌ ADMIN_TELEGRAM_ID не задан, невозможно отправить сообщение")
+			logger.error("❌ ADMIN_TELEGRAM_ID не задан, невозможно отправить сообщение",
+							extra={"operation": "telegram_service", "collection": "config"})
 			return
 		payload = {"type": "info", "text": text, "user_id": None}
 		await broker.publish_telegram(payload)
@@ -119,7 +125,8 @@ async def get_user_by_chat_id(chat_id: int) -> UserORM | None:
 async def is_authorized(message: types.Message) -> bool:
 	user = await get_user_by_chat_id(message.chat.id)
 	if not user or user.status != UserStatus.active:
-		logger.warning(f"Попытка доступа от неавторизованного chat_id: {message.chat.id}")
+		logger.warning(f"Попытка доступа от неавторизованного chat_id: {message.chat.id}",
+						extra={"operation": "telegram_service", "collection": "auth"})
 		return False
 	return True
 
@@ -160,7 +167,7 @@ async def report_command(message: types.Message):
 	async with get_session() as session:
 		result = await session.execute(select(TradeORM))
 		trades = result.scalars().all()
-		report_text = telegram_service.reports_service.generate_rag_report(
+		report_text = telegram_service.reports_service.generate_report(
 			[t.__dict__ for t in trades], output_format="markdown"
 		)
 		await message.answer(report_text)

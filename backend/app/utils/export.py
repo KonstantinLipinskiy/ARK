@@ -12,7 +12,8 @@ def export_to_excel(all_metrics: dict, all_results: dict, filename: str = None):
 	try:
 		# --- Проверка пустых данных ---
 		if not all_metrics and not all_results:
-			logger.warning("⚠️ Нет данных для экспорта, файл не создан")
+			logger.warning("⚠️ Нет данных для экспорта, файл не создан",
+							extra={"operation": "export", "collection": "validation"})
 			return
 
 		# --- Гибкое имя файла ---
@@ -44,6 +45,8 @@ def export_to_excel(all_metrics: dict, all_results: dict, filename: str = None):
 				worksheet = writer.sheets[sheet_name]
 				autofit_columns(worksheet)
 
-		logger.info(f"✅ Excel отчёт сохранён: {filename}")
+		logger.info(f"✅ Excel отчёт сохранён: {filename}",
+					extra={"operation": "export", "collection": "excel"})
 	except Exception as e:
-		logger.error(f"❌ Ошибка экспорта в Excel: {e}")
+		logger.error(f"❌ Ошибка экспорта в Excel: {e}",
+						extra={"operation": "export", "collection": "excel"})

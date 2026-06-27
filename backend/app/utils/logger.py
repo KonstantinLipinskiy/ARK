@@ -76,12 +76,8 @@ def setup_logger():
 	# Основной логгер
 	logger = logging.getLogger("arkbot")
 
-	# Логгер для метрик
+	# Логгер для метрик (уже настроен через logging.ini)
 	metrics_logger = logging.getLogger("metrics")
-	metrics_handler = logging.FileHandler(settings.METRICS_LOG)
-	metrics_handler.setFormatter(MetricsJSONFormatter())
-	metrics_logger.addHandler(metrics_handler)
-	metrics_logger.setLevel(logging.INFO)
 
 	# Добавляем кастомный TelegramHandler (если не подключён через ini)
 	if not any(isinstance(h, TelegramHandler) for h in logger.handlers):
@@ -90,6 +86,7 @@ def setup_logger():
 		logger.addHandler(telegram_handler)
 
 	return logger, metrics_logger
+
 
 # -------------------------------------------------------------------
 # Инициализация логгеров

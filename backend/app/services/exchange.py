@@ -60,7 +60,8 @@ async def get_balance(currency: str = "USDT"):
 		return balance["free"].get(currency, 0.0)
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Balance error: {msg}")
+		logger.error(f"❌ Balance error: {msg}", extra={"operation": "exchange", "collection": currency})
+
 		return 0.0
 
 # --- CREATE ORDER ---
@@ -159,7 +160,7 @@ async def create_order(
 		return order
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Order error: {msg}")
+		logger.error(f"❌ Order error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		if telegram:
 			await telegram.send_message(f"❌ Order failed: {msg}")
 		return {"error": msg}
@@ -224,7 +225,7 @@ async def create_oco_order(
 		return order
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ OCO order error: {msg}")
+		logger.error(f"❌ OCO order error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		if telegram:
 			await telegram.send_message(f"❌ OCO order failed: {msg}")
 		return {"error": msg}
@@ -247,7 +248,7 @@ async def cancel_order(symbol: str, order_id: str, risk_service: RiskService = N
 		return result
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Cancel error: {msg}")
+		logger.error(f"❌ Cancel error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 # --- GET POSITIONS ---
@@ -264,7 +265,7 @@ async def get_positions(symbol: str = None):
 			return await exchange.fetch_balance()
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Positions error: {msg}")
+		logger.error(f"❌ Positions error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 # --- GET OPEN ORDERS ---
@@ -274,7 +275,7 @@ async def get_open_orders(symbol: str = None):
 		return await exchange.fetch_open_orders(symbol)
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Open orders error: {msg}")
+		logger.error(f"❌ Open orders error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 # --- CLOSE POSITION ---
@@ -301,7 +302,7 @@ async def close_position(symbol: str, risk_service: RiskService = None, telegram
 		return {"status": "closed"}
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Close position error: {msg}")
+		logger.error(f"❌ Close position error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 # --- TRADE HISTORY ---
@@ -311,7 +312,7 @@ async def get_trade_history(symbol: str = None):
 		return await exchange.fetch_my_trades(symbol)
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Trade history error: {msg}")
+		logger.error(f"❌ Trade history error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 # --- SET MARGIN MODE ---
@@ -322,7 +323,7 @@ async def set_margin_mode(symbol: str, mode: str = "isolated"):
 		return {"status": f"Margin mode set to {mode}"}
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Margin mode error: {msg}")
+		logger.error(f"❌ Margin mode error: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 
@@ -447,7 +448,7 @@ async def get_ohlcv(
 
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ OHLCV error for {symbol} {timeframe}: {msg}")
+		logger.error(f"❌ OHLCV error for {symbol} {timeframe}: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 
@@ -479,7 +480,10 @@ async def update_ohlcv_for_all_pairs(
 			)
 
 			if isinstance(candles, dict) and "error" in candles:
-					logger.error(f"❌ Failed to update OHLCV for {symbol}: {candles['error']}")
+					logger.error(
+						f"❌ Failed to update OHLCV for {symbol}: {candles['error']}",
+						extra={"operation": "exchange", "collection": symbol}
+					)
 					results[symbol] = candles
 			else:
 					logger.info(f"✅ OHLCV updated for {symbol} ({timeframe})")
@@ -488,7 +492,7 @@ async def update_ohlcv_for_all_pairs(
 		return results
 
 	except Exception as e:
-		logger.error(f"❌ update_ohlcv_for_all_pairs error: {e}")
+		logger.error(f"❌ update_ohlcv_for_all_pairs error: {e}", extra={"operation": "exchange", "collection": "all_pairs"})
 		return {"error": str(e)}
 
 # --- GET TICKER ---
@@ -512,7 +516,7 @@ async def get_ticker(symbol: str):
 		return result
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Ticker error for {symbol}: {msg}")
+		logger.error(f"❌ Ticker error for {symbol}: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 
@@ -536,7 +540,7 @@ async def get_order_book(symbol: str, limit: int = 20):
 		return result
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Order book error for {symbol}: {msg}")
+		logger.error(f"❌ Order book error for {symbol}: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 # --- GET FUNDING RATE ---
@@ -558,7 +562,7 @@ async def get_funding_rate(symbol: str):
 		return result
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Funding rate error for {symbol}: {msg}")
+		logger.error(f"❌ Funding rate error for {symbol}: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 
@@ -580,7 +584,7 @@ async def get_mark_price(symbol: str):
 		return result
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Mark price error for {symbol}: {msg}")
+		logger.error(f"❌ Mark price error for {symbol}: {msg}", extra={"operation": "exchange", "collection": symbol})
 		return {"error": msg}
 
 # --- GET SYMBOLS ---
@@ -603,7 +607,7 @@ async def get_symbols():
 		return result
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Symbols error: {msg}")
+		logger.error(f"❌ Symbols error: {msg}", extra={"operation": "exchange", "collection": "symbols"})
 		return {"error": msg}
 
 
@@ -626,5 +630,5 @@ async def get_exchange_info():
 		return result
 	except Exception as e:
 		msg = format_ccxt_error(e)
-		logger.error(f"❌ Exchange info error: {msg}")
+		logger.error(f"❌ Exchange info error: {msg}", extra={"operation": "exchange", "collection": "info"})
 		return {"error": msg}

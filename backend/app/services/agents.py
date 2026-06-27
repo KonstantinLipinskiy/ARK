@@ -146,7 +146,7 @@ class AgentsService:
 		Форматы: text | json | markdown | html
 		"""
 		try:
-			report = self.reports.generate_rag_report(trades, output_format=output_format)
+			report = self.reports.generate_report(trades, output_format=output_format)
 			logger.info(f"RAG отчёт успешно сформирован агентом, формат={output_format}")
 			return report
 		except Exception as e:

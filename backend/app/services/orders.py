@@ -20,7 +20,7 @@ async def get_balance(currency: str = "USDT"):
 		balance = await exchange.fetch_balance()
 		return balance["free"].get(currency, 0.0)
 	except Exception as e:
-		logger.error(f"❌ Balance error: {e}")
+		logger.error(f"❌ Balance error: {e}", extra={"operation": "orders_service", "collection": currency})
 		return 0.0
 
 # --- ML FEATURES ---
@@ -35,7 +35,7 @@ async def build_features(symbol: str, price: float, db_session: AsyncSession) ->
 
 # --- Общий обработчик ошибок ---
 async def handle_order_error(context: str, error: Exception, broker: RabbitMQBroker):
-	logger.error(f"❌ {context} error: {error}")
+	logger.error(f"❌ {context} error: {error}", extra={"operation": "orders_service", "collection": context})
 	await broker.publish_telegram({
 		"type": "error",
 		"error": f"{context} failed: {error}"
@@ -244,7 +244,9 @@ async def create_oco_order(symbol: str, side: str, amount: float = None,
 			strength=signal_strength,
 			ml_confidence=confidence_score
 		)
+		
 		amount = position_size
+
 
 		valid = await validate_trade(
 			symbol,
@@ -256,12 +258,12 @@ async def create_oco_order(symbol: str, side: str, amount: float = None,
 			strength=signal_strength
 		)
 		if not valid:
-					await broker.publish_telegram({
-			"type": "risk_violation",
-			"trade": {"pair": symbol, "side": side},
-			"reason": "Risk validation failed"
-		})
-		return {"error": "Risk validation failed"}
+			await broker.publish_telegram({
+				"type": "risk_violation",
+				"trade": {"pair": symbol, "side": side},
+				"reason": "Risk validation failed"
+			})
+			return {"error": "Risk validation failed"}
 
 		order = await exchange.create_order(symbol, "limit", side, amount, price, params)
 

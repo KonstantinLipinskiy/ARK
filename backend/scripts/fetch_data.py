@@ -19,7 +19,8 @@ def update_csv(symbol: str, timeframe: str, days: int, out_dir: str):
 		ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=since)
 
 		if not ohlcv or len(ohlcv) == 0:
-			logger.warning(f"⚠️ Нет данных для {symbol} ({timeframe}), файл не обновлён")
+			logger.warning(f"⚠️ Нет данных для {symbol} ({timeframe}), файл не обновлён",
+							extra={"operation": "fetch_data", "collection": "validation"})
 			return
 
 		df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -30,10 +31,12 @@ def update_csv(symbol: str, timeframe: str, days: int, out_dir: str):
 		filepath = os.path.join(out_dir, filename)
 		df.to_csv(filepath, index=False)
 
-		logger.info(f"✅ Updated {filepath} with {len(df)} rows")
+		logger.info(f"✅ Updated {filepath} with {len(df)} rows",
+					extra={"operation": "fetch_data", "collection": "update"})
 
 	except Exception as e:
-		logger.error(f"❌ Ошибка обновления данных для {symbol} ({timeframe}): {e}")
+		logger.error(f"❌ Ошибка обновления данных для {symbol} ({timeframe}): {e}",
+						extra={"operation": "fetch_data", "collection": "error"})
 
 
 if __name__ == "__main__":

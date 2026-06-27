@@ -73,8 +73,11 @@ def fetch_crypto_news_task(pair="BTC/USDT"):
 		news = loader.fetch_newsdata(query=symbol)
 		rss = loader.fetch_coindesk_rss()
 
-		# Фильтрация RSS по ключевому слову монеты
-		filtered_rss = [n for n in rss if symbol.upper() in n or symbol.capitalize() in n]
+		# Фильтрация RSS по ключевому слову монеты (по title в dict)
+		filtered_rss = [
+			n for n in rss
+			if symbol.upper() in (n.get("title") or "") or symbol.capitalize() in (n.get("title") or "")
+		]
 
 		all_news = news + filtered_rss
 		if all_news:
@@ -90,7 +93,7 @@ def fetch_crypto_news_task(pair="BTC/USDT"):
 							title=item.get("title"),
 							content=item.get("content", ""),
 							source=item.get("source", "unknown"),
-							published_at=item.get("published_at")
+							published_at=item.get("pubDate")  # 🔹 исправлено
 						)
 					except Exception as e:
 						logger.error(f"❌ Ошибка сохранения новости: {e}")

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db import crud
 from app.broker.rabbitmq import broker  # ⚡ используем глобальный объект
-from app.cache.redis import RedisCache
+from app.cache.redis import redis_client  # ⚡ используем глобальный объект Redis
 from app.services.indicator_factory import IndicatorFactory
 from app.utils.logger import (
 	logger,
@@ -53,8 +53,8 @@ async def calculate_indicator(
 		# ⚡ используем глобальный broker, который уже подключён в lifespan
 		await broker.publish_indicator(payload)
 
-		redis = RedisCache()
-		await redis.set_task_status(task_id, "queued")
+		# ⚡ используем глобальный redis_client
+		await redis_client.set_task_status(task_id, "queued")
 
 		indicators_tasks_total.inc()
 		indicators_queue_time.observe(time.time() - start_time)
@@ -88,8 +88,8 @@ async def get_indicator_status(task_id: str):
 	Возвращает состояние задачи индикатора из Redis.
 	"""
 	try:
-		redis = RedisCache()
-		status = await redis.get_task_status(task_id)
+		# ⚡ используем глобальный redis_client
+		status = await redis_client.get_task_status(task_id)
 		if not status:
 			raise HTTPException(status_code=404, detail="Task not found")
 		return {"task_id": task_id, "status": status}

@@ -1,4 +1,4 @@
-#app/services/reports_worker.py
+# app/services/reports_worker.py
 import asyncio
 import time
 from app.services.reports import ReportsService
@@ -22,11 +22,14 @@ class ReportsWorker:
 			user_id = body.get("user_id")
 			export_format = body.get("export_format", "text")  # text, json, markdown, html, pdf
 
-			logger.info(f"📥 Получен запрос на отчёт (user_id={user_id}, format={export_format})")
+			logger.info(
+				f"📥 Получен запрос на отчёт (user_id={user_id}, format={export_format})",
+				extra={"operation": "reports_worker", "collection": export_format}
+			)
 			REPORT_REQUESTS_TOTAL.inc()
 
 			# Генерация отчёта с пробросом формата
-			report_text = self.reports_service.generate_rag_report(
+			report_text = self.reports_service.generate_report(
 				trades,
 				filters=filters,
 				output_format=export_format if export_format in ["text", "json", "markdown", "html"] else "text"
@@ -56,10 +59,16 @@ class ReportsWorker:
 				"latency": duration
 			}
 			await self.broker.publish_telegram(response_payload)
-			logger.info(f"📤 Отчёт отправлен пользователю {user_id}, формат={export_format}")
+			logger.info(
+				f"📤 Отчёт отправлен пользователю {user_id}, формат={export_format}",
+				extra={"operation": "reports_worker", "collection": export_format}
+			)
 
 		except Exception as e:
-			logger.error(f"❌ Ошибка генерации отчёта: {e}")
+			logger.error(
+				f"❌ Ошибка генерации отчёта: {e}",
+				extra={"operation": "reports_worker", "collection": "reports"}
+			)
 			error_payload = {
 				"type": "report_error",
 				"error": str(e),
@@ -76,7 +85,10 @@ class ReportsWorker:
 			)
 		finally:
 			await self.broker.close()
-			logger.info("🔌 ReportsWorker stopped, RabbitMQ connection closed")
+			logger.info(
+				"🔌 ReportsWorker stopped, RabbitMQ connection closed",
+				extra={"operation": "reports_worker", "collection": "system"}
+			)
 
 async def main():
 	worker = ReportsWorker(collection_name="trades")
@@ -86,6 +98,12 @@ if __name__ == "__main__":
 	try:
 		asyncio.run(main())
 	except KeyboardInterrupt:
-		logger.info("🛑 ReportsWorker stopped manually")
+		logger.info(
+			"🛑 ReportsWorker stopped manually",
+			extra={"operation": "reports_worker", "collection": "system"}
+		)
 	except Exception as e:
-		logger.error(f"❌ Fatal error in ReportsWorker: {e}")
+		logger.critical(
+			f"❌ Fatal error in ReportsWorker: {e}",
+			extra={"operation": "reports_worker", "collection": "system"}
+		)

@@ -33,30 +33,40 @@ class ReportsService:
 	def use_collection(self, name: str):
 		self.vector_db.use_collection(name)
 
-	def generate_report(self, trades: list[dict], output_format: str = "text") -> str:
-		"""
-		Генерация RAG-отчёта по сделкам с поддержкой разных форматов.
-		Форматы: text | json | markdown | html
-		"""
-		try:
-			report = self.reports.generate_rag_report(trades, output_format=output_format)
-			logger.info(f"RAG отчёт успешно сформирован агентом, формат={output_format}")
-			return report
-		except Exception as e:
-			logger.error(f"Ошибка генерации отчёта агентом: {e}")
-			return f"❌ Ошибка генерации отчёта: {e}"
-
-	def generate_rag_report(
+	def generate_report(
 		self,
 		trades: List[Dict],
 		filters: Optional[Dict] = None,
 		limit: int = 100,
-		output_format: str = "text"  # text | json | markdown | html
+		output_format: str = "text"
 	) -> str:
-		"""Комплексный RAG-отчёт с метриками, ML прогнозами и сравнением стратегий/пользователей.
-		🔹 Добавлена фильтрация: исключаем тестовые трейды и нерелевантные документы.
-		🔹 Поддержка форматов: text, json, markdown, html.
 		"""
+		Публичный метод генерации RAG-отчёта по сделкам.
+		Поддержка форматов: text | json | markdown | html.
+		"""
+		try:
+			report = self._generate_rag_report(trades, filters=filters, limit=limit, output_format=output_format)
+			logger.info(
+				f"RAG отчёт успешно сформирован, формат={output_format}",
+				extra={"operation": "reports_service", "collection": output_format}
+			)
+			return report
+		except Exception as e:
+			logger.error(
+				f"Ошибка генерации отчёта: {e}",
+				extra={"operation": "reports_service", "collection": "reports"}
+			)
+			return f"❌ Ошибка генерации отчёта: {e}"
+
+
+	def _generate_rag_report(
+		self,
+		trades: List[Dict],
+		filters: Optional[Dict] = None,
+		limit: int = 100,
+		output_format: str = "text"
+	) -> str:
+		"""Внутренний метод: комплексный RAG-отчёт с метриками, ML прогнозами и сравнением стратегий/пользователей."""
 		self.requests_count += 1
 		REPORT_REQUESTS_TOTAL.inc()
 		start = time.time()
@@ -96,7 +106,7 @@ class ReportsService:
 				prob = self.ml.predict_signal(features)
 				ml_summary = f"ML прогноз по последнему сигналу: {prob:.2f}"
 		except Exception as e:
-			logger.error(f"Ошибка ML прогноза: {e}")
+			logger.error(f"Ошибка ML прогноза: {e}", extra={"operation": "reports_service", "collection": "ml"})
 
 		search_results = []
 		try:
@@ -107,7 +117,7 @@ class ReportsService:
 				search_results = self.vector_db.search(query_vector, limit)
 			search_results = [doc for doc in search_results if not doc.get("payload", {}).get("irrelevant", False)]
 		except Exception as e:
-			logger.error(f"Ошибка поиска документов для отчёта: {e}")
+			logger.error(f"Ошибка поиска документов для отчёта: {e}", extra={"operation": "reports_service", "collection": "vector_db"})
 
 		comparison_summary = []
 		try:
@@ -122,7 +132,7 @@ class ReportsService:
 						"profit": m["total_profit"]
 					})
 		except Exception as e:
-			logger.error(f"Ошибка сравнения стратегий/пользователей: {e}")
+			logger.error(f"Ошибка сравнения стратегий/пользователей: {e}", extra={"operation": "reports_service", "collection": "comparison"})
 
 		if output_format == "json":
 			report = json.dumps({
@@ -206,7 +216,6 @@ class ReportsService:
 		duration = time.time() - start
 		self.total_time += duration
 		REPORT_AVG_RESPONSE_TIME.set(self.total_time / self.requests_count)
-		logger.info(f"RAG отчёт успешно сформирован, формат={output_format}")
 		return report
 
 	def export_report_pdf(self, report_text: str, filename: str = "report.pdf"):
@@ -217,9 +226,15 @@ class ReportsService:
 			for line in report_text.split("\n"):
 				pdf.multi_cell(0, 10, line)
 			pdf.output(filename)
-			logger.info(f"PDF отчёт сохранён: {filename}")
+			logger.info(
+				f"PDF отчёт сохранён: {filename}",
+				extra={"operation": "reports_service", "collection": "pdf"}
+			)
 		except Exception as e:
-			logger.error(f"Ошибка экспорта PDF: {e}")
+			logger.error(
+				f"Ошибка экспорта PDF: {e}",
+				extra={"operation": "reports_service", "collection": "pdf"}
+			)
 
 	def export_report_html(self, report_text: str, filename: str = "report.html"):
 		try:
@@ -234,9 +249,16 @@ class ReportsService:
 			html_content = template.render(report=report_text)
 			with open(filename, "w", encoding="utf-8") as f:
 				f.write(html_content)
-			logger.info(f"HTML отчёт сохранён: {filename}")
+			logger.info(
+				f"HTML отчёт сохранён: {filename}",
+				extra={"operation": "reports_service", "collection": "html"}
+			)
 		except Exception as e:
-			logger.error(f"Ошибка экспорта HTML: {e}")
+			logger.error(
+				f"Ошибка экспорта HTML: {e}",
+				extra={"operation": "reports_service", "collection": "html"}
+			)
+
 
 	def add_document(self, vector: list[float], payload: dict):
 		self.vector_db.insert_vector(vector, payload)

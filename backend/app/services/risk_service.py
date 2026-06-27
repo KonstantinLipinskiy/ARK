@@ -4,7 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 from app.db.schemas import RiskSettingsORM, RiskSettingsLogORM
-from app.utils.logger import logger
+from app.utils.logger import logger, log_risk_violation, log_signal_rejected
 from app.config import settings
 
 # 🔹 Кэш для настроек риска
@@ -20,7 +20,10 @@ async def load_risk_settings(db: AsyncSession, use_cache: bool = True) -> dict:
 	risk_settings = result.scalar_one_or_none()
 
 	if not risk_settings:
-		logger.warning("⚠️ В таблице risk_settings нет записей, используются дефолтные значения")
+		logger.warning(
+			"⚠️ В таблице risk_settings нет записей, используются дефолтные значения",
+			extra={"operation": "risk_service", "collection": "risk_settings"}
+		)
 		_risk_cache = {
 			"max_risk_per_trade": 0.01,
 			"max_open_trades": 5,
@@ -68,7 +71,10 @@ async def update_risk_settings(db: AsyncSession, updates: dict, updated_by: str 
 
 		await db.commit()
 		await db.refresh(risk_settings)
-		logger.info("♻️ Параметры риска обновлены")
+		logger.info(
+			"♻️ Параметры риска обновлены",
+			extra={"operation": "risk_service", "collection": "risk_settings"}
+		)
 
 		try:
 			log_entry = RiskSettingsLogORM(
@@ -79,14 +85,20 @@ async def update_risk_settings(db: AsyncSession, updates: dict, updated_by: str 
 			db.add(log_entry)
 			await db.commit()
 		except Exception as log_err:
-			logger.error(f"⚠️ Ошибка логирования изменений risk_settings: {log_err}")
+			logger.error(
+				f"⚠️ Ошибка логирования изменений risk_settings: {log_err}",
+				extra={"operation": "risk_service", "collection": "risk_settings"}
+			)
 			await db.rollback()
 
 		_risk_cache = await load_risk_settings(db, use_cache=False)
 		return _risk_cache
 
 	except SQLAlchemyError as e:
-		logger.error(f"❌ Ошибка обновления risk_settings: {e}")
+		logger.error(
+			f"❌ Ошибка обновления risk_settings: {e}",
+			extra={"operation": "risk_service", "collection": "risk_settings"}
+		)
 		await db.rollback()
 		return None
 
@@ -131,22 +143,26 @@ async def validate_trade(symbol: str, deposit: float, entry_price: float,
 
 	# Проверка количества открытых сделок
 	if open_trades >= max_open_trades:
-		logger.warning(f"⚠️ Превышен лимит открытых сделок ({open_trades}/{max_open_trades})")
+		log_risk_violation(symbol, f"Превышен лимит открытых сделок ({open_trades}/{max_open_trades})",
+			operation="risk_service", collection="trade_validation")
 		return False
 
 	# Проверка дневного убытка
 	if total_loss_pct > max_daily_loss:
-		logger.warning(f"⚠️ Превышен дневной лимит убытка ({total_loss_pct}/{max_daily_loss})")
+		log_risk_violation(symbol, f"Превышен дневной лимит убытка ({total_loss_pct}/{max_daily_loss})",
+			operation="risk_service", collection="trade_validation")
 		return False
 
 	# Проверка силы сигнала
 	if strength < settings.CONFIDENCE_THRESHOLD:
-		logger.warning(f"⚠️ Сигнал отклонён: strength={strength:.2f} < threshold={settings.CONFIDENCE_THRESHOLD}")
+		log_signal_rejected(symbol, strength,
+			operation="risk_service", collection="trade_validation")
 		return False
 
 	# Проверка соотношения риск/прибыль
 	if risk_reward_ratio < 1.0:
-		logger.warning(f"⚠️ Недопустимое соотношение риск/прибыль ({risk_reward_ratio})")
+		log_risk_violation(symbol, f"Недопустимое соотношение риск/прибыль ({risk_reward_ratio})",
+			operation="risk_service", collection="trade_validation")
 		return False
 
 	return True

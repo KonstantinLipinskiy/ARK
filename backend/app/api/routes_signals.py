@@ -109,7 +109,7 @@ async def create_signal(
 	try:
 		latest_news = news_loader.fetch_newsdata(query=signal.symbol.split("/")[0].lower())
 		if latest_news:
-			df_news = ml_service.prepare_data([{"news": text} for text in latest_news])
+			df_news = ml_service.prepare_data([{"news": item.get("title", "")} for item in latest_news])
 			features["news_sentiment"] = df_news["news_sentiment"].mean()
 		else:
 			features["news_sentiment"] = 0.0
@@ -142,10 +142,16 @@ async def create_signal(
 		await redis_client.set_json("last_signal", new_signal.dict(), expire=300)
 		logger.info(f"💾 Сигнал сохранён в Redis: {new_signal.symbol}")
 
-		msg = f"📈 Новый сигнал: {new_signal.symbol} {new_signal.direction} ({new_signal.indicator})"
-		if prob is not None:
-			msg += f" | ML prob={prob:.2f}"
-		await send_trade_notification(msg)
+		# ⚡ корректный вызов send_trade_notification — передаём словарь trade
+		trade_payload = {
+			"pair": new_signal.symbol,
+			"status": "signal_created",
+			"direction": new_signal.direction,
+			"indicator": new_signal.indicator,
+			"confidence_score": prob if prob is not None else None,
+			"timestamp": str(new_signal.timestamp)
+		}
+		await send_trade_notification(trade_payload, user_id=current_user["user_id"])
 
 		logger.info(f"✅ Сигнал создан: {new_signal.symbol} {new_signal.direction}")
 		return new_signal
