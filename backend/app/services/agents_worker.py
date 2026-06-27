@@ -31,7 +31,7 @@ class AgentsWorker:
 			else:
 				result = self.agents_service.run_agent(query)
 
-			latency = time.time() - start_time
+			latency = time.time() - start_time  # ⚡ latency в секундах
 			AGENT_LATENCY.observe(latency)
 
 			response_payload = {
@@ -48,13 +48,16 @@ class AgentsWorker:
 			)
 
 		except Exception as e:
+			latency = time.time() - start_time  # фиксируем время даже при ошибке
+			AGENT_LATENCY.observe(latency)
 			AGENT_ERRORS.inc()
 			logger.error(f"❌ Ошибка обработки агента: {e}")
 			error_payload = {
 				"type": "agent_error",
 				"error": str(e),
 				"query": body.get("query", "-"),
-				"user_id": body.get("user_id", None)
+				"user_id": body.get("user_id", None),
+				"latency": latency
 			}
 			# ⚡ публикация ошибки также в telegram_notifications
 			await self.broker.publish_telegram(error_payload)

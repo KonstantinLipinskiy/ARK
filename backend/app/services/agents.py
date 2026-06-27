@@ -7,7 +7,13 @@ from langchain_community.memory import ConversationBufferMemory
 
 from app.services.reports import ReportsService
 from app.db.vector import VectorDB
-from app.utils.metrics import calculate_metrics, ml_accuracy, ml_loss, ml_precision, ml_recall
+from app.utils.metrics import (
+	calculate_metrics,
+	get_accuracy,
+	get_loss,
+	get_precision,
+	get_recall
+)
 from app.config import settings
 from app.services.orders import OrdersService
 from app.utils.logger import logger
@@ -181,10 +187,10 @@ class AgentsService:
 		metrics = calculate_metrics(trades)
 		return (
 			f"Winrate: {metrics['winrate']:.2%}, Profit: {metrics['total_profit']:.2f}, "
-			f"ML Accuracy: {ml_accuracy._value.get():.2f}, "
-			f"Precision: {ml_precision._value.get():.2f}, "
-			f"Recall: {ml_recall._value.get():.2f}, "
-			f"Loss: {ml_loss._value.get():.4f}"
+			f"ML Accuracy: {get_accuracy():.2f}, "
+			f"Precision: {get_precision():.2f}, "
+			f"Recall: {get_recall():.2f}, "
+			f"Loss: {get_loss():.4f}"
 		)
 
 	def search_vector(self, query: dict) -> str:

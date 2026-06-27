@@ -1,3 +1,4 @@
+#app/monitoring/prometheus.py
 from fastapi import APIRouter, Response, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -9,8 +10,10 @@ from app.utils.metrics import (
 	calculate_metrics,
 	calculate_metrics_by_user,
 	calculate_metrics_by_strategy,
-	ml_accuracy,
-	ml_loss,
+	get_accuracy,
+	get_loss,
+	get_precision,
+	get_recall,
 	ml_epoch_loss,
 	ml_training_time,
 	ml_learning_rate,
@@ -119,10 +122,7 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 	)
 	trades_closed_total.set(closed_trades or 0)
 
-	cancelled_trades = await db.scalar(
-		select(func.count()).select_from(TradeORM).filter(TradeORM.status == TradeStatus.cancelled)
-	)
-	trades_cancelled_total.set(cancelled_trades or 0)
+	trades_cancelled_total.set(stats["cancelled_trades"])
 
 	# Количество активных сигналов
 	active_signals = await db.scalar(
@@ -204,19 +204,19 @@ async def metrics_endpoint(request: Request, db: AsyncSession = Depends(get_db))
 
 	# --- Метрики ML ---
 	try:
-		ml_accuracy_gauge.set(ml_accuracy())
-		ml_precision_gauge.set(ml_cv_precision())
-		ml_recall_gauge.set(ml_cv_recall())
-		ml_loss_gauge.set(ml_loss())
-		ml_epoch_loss_gauge.set(ml_epoch_loss())
-		ml_training_time_gauge.set(ml_training_time())
-		ml_learning_rate_gauge.set(ml_learning_rate())
-		ml_cv_accuracy_gauge.set(ml_cv_accuracy())
-		ml_cv_loss_gauge.set(ml_cv_loss())
+		ml_accuracy_gauge.set(get_accuracy())
+		ml_precision_gauge.set(get_precision())
+		ml_recall_gauge.set(get_recall())
+		ml_loss_gauge.set(get_loss())
+		ml_epoch_loss_gauge.set(ml_epoch_loss._sum.get() or 0.0)
+		ml_training_time_gauge.set(ml_training_time._value.get() or 0.0)
+		ml_learning_rate_gauge.set(ml_learning_rate._value.get() or 0.0)
+		ml_cv_accuracy_gauge.set(ml_cv_accuracy._value.get() or 0.0)
+		ml_cv_loss_gauge.set(ml_cv_loss._value.get() or 0.0)
 		ml_training_runs_total.inc()
 		ml_predictions_total.inc()
 		# 🔹 Используем реальное значение confidence модели
-		confidence_value = ml_prediction_confidence()
+		confidence_value = ml_prediction_confidence._sum.get() if hasattr(ml_prediction_confidence, "_sum") else None
 		if confidence_value is not None:
 			ml_prediction_confidence.observe(confidence_value)
 	except Exception:

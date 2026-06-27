@@ -1,7 +1,7 @@
 # app/services/ml.py
 import pandas as pd
 import joblib
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 import torch
@@ -10,16 +10,20 @@ import torch.optim as optim
 from tensorflow import keras
 from transformers import pipeline
 import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.model_selection import StratifiedKFold
 import time
+from sentence_transformers import SentenceTransformer
 from app.db.vector import VectorDB
 from app.utils.logger import logger, log_model_load
 from app.config import settings
 from app.services.exchange import get_ticker, get_order_book, get_mark_price
 from app.services.news_loader import NewsLoader
-from sklearn.model_selection import train_test_split
-from app.utils.metrics import export_ml_metrics, aggregate_cv_metrics, export_cv_metrics
+from app.utils.metrics import (
+	export_ml_metrics,
+	aggregate_cv_metrics,
+	export_cv_metrics,
+	log_training_run,
+	log_prediction
+)
 from app.db import crud
 from app.db.session import get_session
 
@@ -44,6 +48,7 @@ class MLService:
 		"""
 		Принимает список сделок/свечей и готовит признаки для ML-модели.
 		Добавляет индикаторы и новостной сентимент.
+		Winrate и метрики формируются как доли (0–1).
 		"""
 		df = pd.DataFrame(trades)
 
@@ -59,10 +64,9 @@ class MLService:
 						"title": article.get("title", ""),
 						"timestamp": pd.to_datetime(article.get("pubDate")),
 						"sentiment": (
-							self.sentiment_pipeline(article.get("title"))[0]["score"]
-							if self.sentiment_pipeline(article.get("title"))[0]["label"] == "POSITIVE"
-							else -self.sentiment_pipeline(article.get("title"))[0]["score"]
-						)
+							res[0]["score"] if res[0]["label"] == "POSITIVE"
+							else -res[0]["score"]
+						) if (res := self.sentiment_pipeline(article.get("title"))) else 0.0
 					}
 					for article in all_news if article.get("pubDate") and isinstance(article.get("title"), str)
 				])
@@ -84,9 +88,10 @@ class MLService:
 			# если колонка news уже есть в df
 			if self.sentiment_pipeline:
 				df["news_sentiment"] = df["news"].apply(
-					lambda text: self.sentiment_pipeline(text)[0]["score"]
-					if self.sentiment_pipeline(text)[0]["label"] == "POSITIVE"
-					else -self.sentiment_pipeline(text)[0]["score"]
+					lambda text: (
+						res[0]["score"] if res[0]["label"] == "POSITIVE"
+						else -res[0]["score"]
+					) if (res := self.sentiment_pipeline(text)) else 0.0
 				)
 			else:
 				df["news_sentiment"] = 0.0
@@ -121,69 +126,78 @@ class MLService:
 
 		# --- новые признаки ---
 		if "close" in df.columns:
-			# Волатильность (rolling std доходности)
 			df["volatility"] = df["close"].pct_change().rolling(window=20).std()
-
-			# Momentum (средняя доходность за окно)
 			df["momentum"] = df["close"].pct_change().rolling(window=10).mean()
 
 		if "news_sentiment" in df.columns:
-			# Сглаженный сентимент (rolling average)
 			df["sentiment_ma"] = df["news_sentiment"].rolling(window=6).mean()
 
 		if {"bid", "ask"} <= set(df.columns):
-			# Liquidity ratio
 			df["bid_ask_ratio"] = df["bid"] / df["ask"]
-
 
 		return df
 
 
 	# --- ДОБАВЛЕНИЕ РЫНОЧНЫХ ДАННЫХ ---
 	async def enrich_with_market_data(self, symbol: str, trades: list[dict]) -> pd.DataFrame:
+		"""
+		Обогащает трейды рыночными данными:
+		- ticker (last, bid, ask, spread)
+		- order book (liquidity imbalance)
+		- mark price
+		Все значения добавляются как константы для каждой строки DataFrame.
+		"""
 		df = pd.DataFrame(trades)
-		ticker = await get_ticker(symbol)
-		if "error" not in ticker:
-			df["last_price"] = ticker["last"]
-			df["bid"] = ticker["bid"]
-			df["ask"] = ticker["ask"]
-			df["spread"] = ticker["spread"]
 
+		# --- Ticker ---
+		ticker = await get_ticker(symbol)
+		if ticker and "error" not in ticker:
+			df["last_price"] = ticker.get("last", 0.0)
+			df["bid"] = ticker.get("bid", 0.0)
+			df["ask"] = ticker.get("ask", 0.0)
+			df["spread"] = ticker.get("spread", 0.0)
+
+		# --- Order book ---
 		order_book = await get_order_book(symbol, limit=20)
-		if "error" not in order_book:
-			total_bids = sum([b[1] for b in order_book["bids"]])
-			total_asks = sum([a[1] for a in order_book["asks"]])
+		if order_book and "error" not in order_book:
+			total_bids = sum(b[1] for b in order_book.get("bids", []))
+			total_asks = sum(a[1] for a in order_book.get("asks", []))
 			df["liquidity_imbalance"] = total_bids - total_asks
 
+		# --- Mark price ---
 		mark = await get_mark_price(symbol)
-		if "error" not in mark:
-			df["mark_price"] = mark["markPrice"]
+		if mark and "error" not in mark:
+			df["mark_price"] = mark.get("markPrice", 0.0)
 
 		return df
 
+
 	# --- ОБУЧЕНИЕ ---
-	def train(self, 
-				df: pd.DataFrame, 
-				model_type: str = "sklearn", 
-				epochs: int = settings.ML_EPOCHS, 
-				learning_rate: float = settings.ML_LEARNING_RATE, 
-				dropout: float = settings.ML_DROPOUT, 
-				hidden_size: int = settings.ML_HIDDEN_SIZE, 
+	def train(self,
+				df: pd.DataFrame,
+				model_type: str = "sklearn",
+				epochs: int = settings.ML_EPOCHS,
+				learning_rate: float = settings.ML_LEARNING_RATE,
+				dropout: float = settings.ML_DROPOUT,
+				hidden_size: int = settings.ML_HIDDEN_SIZE,
 				num_layers: int = settings.ML_NUM_LAYERS,
 				use_cross_validation: bool = settings.ML_USE_CV,
 				n_splits: int = settings.ML_CV_SPLITS) -> dict:
 
 		# --- общий набор признаков ---
-		features = ["ema", "rsi", "macd", "hour", "atr",
-					"bollinger_upper", "bollinger_lower", "bollinger",
-					"obv", "stochastic", "vwap", "ichimoku",
-					"volume", "volume_ma", "news_sentiment",
-					"last_price", "spread", "liquidity_imbalance", "mark_price",
-					"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"]
+		features = [
+			"ema", "rsi", "macd", "hour", "atr",
+			"bollinger_upper", "bollinger_lower", "bollinger",
+			"obv", "stochastic", "vwap", "ichimoku",
+			"volume", "volume_ma", "news_sentiment",
+			"last_price", "spread", "liquidity_imbalance", "mark_price",
+			"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"
+		]
 
 		X = df[features].fillna(0)
 		y = df["result"]
 
+		# --- SKLEARN ---
 		if model_type == "sklearn":
 			if use_cross_validation:
 				kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
@@ -204,15 +218,10 @@ class MLService:
 						"loss": 0.0
 					})
 
-				# усреднение по фолдам
 				metrics = aggregate_cv_metrics(fold_metrics)
 				self.model = model
 
-				# экспорт в Prometheus
 				export_cv_metrics(metrics)
-
-				# 🔹 авто‑логирование обучения
-				from app.utils.metrics import log_training_run
 				log_training_run(metrics)
 
 				return metrics
@@ -229,14 +238,11 @@ class MLService:
 					"loss": 0.0
 				}
 				export_ml_metrics(metrics, training_time=0, learning_rate=None)
-
-				# 🔹 авто‑логирование обучения
-				from app.utils.metrics import log_training_run
 				log_training_run(metrics, training_time=0, learning_rate=None)
 
 				return metrics
 
-
+		# --- PYTORCH MLP ---
 		elif model_type == "pytorch_mlp":
 			if use_cross_validation:
 				kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
@@ -280,15 +286,10 @@ class MLService:
 							"loss": loss.item()
 						})
 
-				# усреднение по фолдам
 				metrics = aggregate_cv_metrics(fold_metrics)
 				self.model = model
 
-				# экспорт в Prometheus
 				export_cv_metrics(metrics)
-
-				# 🔹 авто‑логирование обучения
-				from app.utils.metrics import log_training_run
 				log_training_run(metrics)
 
 				return metrics
@@ -335,13 +336,9 @@ class MLService:
 
 				metrics = {"accuracy": acc, "precision": precision, "recall": recall, "loss": loss.item()}
 				export_ml_metrics(metrics, epoch_losses=epoch_losses, training_time=training_time, learning_rate=learning_rate)
-
-				# 🔹 авто‑логирование обучения
-				from app.utils.metrics import log_training_run
 				log_training_run(metrics, epoch_losses=epoch_losses, training_time=training_time, learning_rate=learning_rate)
 
 				return metrics
-
 
 		elif model_type == "pytorch_lstm":
 			if use_cross_validation:
@@ -401,7 +398,6 @@ class MLService:
 				export_cv_metrics(metrics)
 
 				# 🔹 авто‑логирование обучения
-				from app.utils.metrics import log_training_run
 				log_training_run(metrics)
 
 				return metrics
@@ -459,7 +455,6 @@ class MLService:
 					export_ml_metrics(metrics, epoch_losses=epoch_losses, training_time=training_time, learning_rate=learning_rate)
 
 					# 🔹 авто‑логирование обучения
-					from app.utils.metrics import log_training_run
 					log_training_run(metrics, epoch_losses=epoch_losses, training_time=training_time, learning_rate=learning_rate)
 
 					return metrics
@@ -509,7 +504,6 @@ class MLService:
 				export_cv_metrics(metrics)
 
 				# 🔹 авто‑логирование обучения
-				from app.utils.metrics import log_training_run
 				log_training_run(metrics)
 
 				return metrics
@@ -548,7 +542,6 @@ class MLService:
 					export_ml_metrics(metrics, epoch_losses=history.history["loss"], training_time=training_time, learning_rate=learning_rate)
 
 					# 🔹 авто‑логирование обучения
-					from app.utils.metrics import log_training_run
 					log_training_run(metrics, epoch_losses=history.history["loss"], training_time=training_time, learning_rate=learning_rate)
 
 					return metrics
@@ -557,6 +550,7 @@ class MLService:
 
 		else:
 			raise ValueError("Неизвестный тип модели")
+
 
 	# --- ПРЕДСКАЗАНИЯ ---
 	def predict_signal(self, features: dict) -> float:
@@ -568,6 +562,7 @@ class MLService:
 	def predict_with_confidence(self, features: dict) -> dict:
 		if not self.model:
 			raise ValueError("Model not trained")
+		start_time = time.time()
 		X = pd.DataFrame([features])
 		proba = self.model.predict_proba(X)[0]
 		confidence_score = abs(proba[1] - proba[0])
@@ -580,10 +575,10 @@ class MLService:
 				extra={"operation": "insert", "collection": "signals"}
 			)
 
-		# 🔹 Авто‑логирование предсказания
+		# 🔹 Авто‑логирование предсказания с latency
 		try:
-			from app.utils.metrics import log_prediction
-			log_prediction(features, result, confidence_score)
+			latency = time.time() - start_time
+			log_prediction(features, result, confidence_score, latency=latency)
 		except Exception as e:
 			logger.error(f"Ошибка авто‑логирования предсказания: {e}")
 
@@ -611,8 +606,15 @@ class MLService:
 	def analyze_news(self, text: str) -> dict:
 		if not self.sentiment_pipeline:
 			return {"label": "UNKNOWN", "score": 0.0}
-		result = self.sentiment_pipeline(text)[0]
 
+		# Получаем результат анализа
+		try:
+			result = self.sentiment_pipeline(text)[0]
+		except Exception as e:
+			logger.error(f"Ошибка анализа новости: {e}")
+			return {"label": "ERROR", "score": 0.0}
+
+		# Если новость слишком короткая — не сохраняем эмбеддинг
 		if len(text.strip()) < 20:
 			logger.info("Новость слишком короткая, эмбеддинг не сохраняем")
 			return result
@@ -620,7 +622,12 @@ class MLService:
 		try:
 			self.vector_db.use_collection("news")
 			vector = self.embedding_model.encode(text).tolist()
-			payload = {"id": hash(text), "text": text, "label": result["label"], "score": result["score"]}
+			payload = {
+				"id": hash(text),
+				"text": text,
+				"label": result.get("label", "UNKNOWN"),
+				"score": result.get("score", 0.0)
+			}
 
 			existing = self.vector_db.search_with_filter(vector, {"id": payload["id"]}, top_k=1)
 			if existing and not isinstance(existing, dict) and len(existing) > 0:
@@ -628,145 +635,192 @@ class MLService:
 				return result
 
 			self.vector_db.insert_vector(vector, payload)
+			logger.info(f"Эмбеддинг новости сохранён: {payload}",
+						extra={"operation": "insert", "collection": "news"})
 		except Exception as e:
 			logger.error(f"Ошибка сохранения эмбеддинга новости: {e}",
 							extra={"operation": "insert", "collection": "news"})
+
 		return result
 
-	# --- СОХРАНЕНИЕ/ЗАГРУЗКА МОДЕЛИ ---
+
+	# --- СОХРАНЕНИЕ МОДЕЛИ ---
 	def save_model(self, path: str):
+		if not path or not isinstance(path, str):
+			raise ValueError("Некорректный путь для сохранения модели")
+
 		if self.model is None:
 			raise ValueError("Нет обученной модели для сохранения")
-		if isinstance(self.model, RandomForestClassifier):
-			joblib.dump(self.model, path)
-		elif isinstance(self.model, nn.Module):
-			torch.save(self.model.state_dict(), path)
-		elif isinstance(self.model, keras.Model):
-			self.model.save(path)
-		else:
-			raise TypeError("Неизвестный тип модели")
+
+		try:
+			if isinstance(self.model, RandomForestClassifier):
+				joblib.dump(self.model, path)
+				logger.info(f"Модель sklearn сохранена: {path}")
+			elif isinstance(self.model, nn.Module):
+				torch.save(self.model.state_dict(), path)
+				logger.info(f"Модель PyTorch сохранена: {path}")
+			elif isinstance(self.model, keras.Model):
+				self.model.save(path)
+				logger.info(f"Модель TensorFlow/Keras сохранена: {path}")
+			else:
+				raise TypeError(f"Неизвестный тип модели: {type(self.model)}")
+		except Exception as e:
+			logger.error(f"Ошибка сохранения модели: {e}", extra={"operation": "save_model", "path": path})
+			raise
 
 
 	def load_model(self, path: str, model_type: str):
-		if model_type == "sklearn":
-			self.model = joblib.load(path)
+		if not path or not isinstance(path, str):
+			raise ValueError("Некорректный путь для загрузки модели")
 
-		elif model_type == "pytorch_mlp":
-			params = settings.MODEL_PARAMS
-			input_size = len([
-				"ema", "rsi", "macd", "hour", "atr",
-				"bollinger_upper", "bollinger_lower", "bollinger",
-				"obv", "stochastic", "vwap", "ichimoku",
-				"volume", "volume_ma", "news_sentiment",
-				"last_price", "spread", "liquidity_imbalance", "mark_price",
-				"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"
-			])
-			hidden_size = params.get("hidden_size", 64)
-			dropout = params.get("dropout", 0.3)
+		try:
+			if model_type == "sklearn":
+				self.model = joblib.load(path)
+				logger.info(f"Модель sklearn загружена: {path}")
 
-			model = nn.Sequential(
-				nn.Linear(input_size, hidden_size),
-				nn.BatchNorm1d(hidden_size),
-				nn.ReLU(),
-				nn.Dropout(dropout),
-				nn.Linear(hidden_size, hidden_size // 2),
-				nn.ReLU(),
-				nn.Linear(hidden_size // 2, 2)
-			)
-			model.load_state_dict(torch.load(path))
-			self.model = model
+			elif model_type == "pytorch_mlp":
+				params = settings.MODEL_PARAMS
+				input_size = len([
+					"ema", "rsi", "macd", "hour", "atr",
+					"bollinger_upper", "bollinger_lower", "bollinger",
+					"obv", "stochastic", "vwap", "ichimoku",
+					"volume", "volume_ma", "news_sentiment",
+					"last_price", "spread", "liquidity_imbalance", "mark_price",
+					"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"
+				])
+				hidden_size = params.get("hidden_size", 64)
+				dropout = params.get("dropout", 0.3)
 
-		elif model_type == "pytorch_lstm":
-			params = settings.MODEL_PARAMS
-			input_size = len([
-				"ema", "rsi", "macd", "hour", "atr",
-				"bollinger_upper", "bollinger_lower", "bollinger",
-				"obv", "stochastic", "vwap", "ichimoku",
-				"volume", "volume_ma", "news_sentiment",
-				"last_price", "spread", "liquidity_imbalance", "mark_price",
-				"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"
-			])
-			hidden_size = params.get("hidden_size", 64)
-			num_layers = params.get("num_layers", 2)
+				model = nn.Sequential(
+					nn.Linear(input_size, hidden_size),
+					nn.BatchNorm1d(hidden_size),
+					nn.ReLU(),
+					nn.Dropout(dropout),
+					nn.Linear(hidden_size, hidden_size // 2),
+					nn.ReLU(),
+					nn.Linear(hidden_size // 2, 2)
+				)
+				model.load_state_dict(torch.load(path))
+				self.model = model
+				logger.info(f"Модель PyTorch MLP загружена: {path}")
 
-			class LSTMModel(nn.Module):
-				def __init__(self, input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, output_size=2):
-					super().__init__()
-					self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-					self.fc = nn.Linear(hidden_size, output_size)
+			elif model_type == "pytorch_lstm":
+				params = settings.MODEL_PARAMS
+				input_size = len([
+					"ema", "rsi", "macd", "hour", "atr",
+					"bollinger_upper", "bollinger_lower", "bollinger",
+					"obv", "stochastic", "vwap", "ichimoku",
+					"volume", "volume_ma", "news_sentiment",
+					"last_price", "spread", "liquidity_imbalance", "mark_price",
+					"volatility", "momentum", "sentiment_ma", "bid_ask_ratio"
+				])
+				hidden_size = params.get("hidden_size", 64)
+				num_layers = params.get("num_layers", 2)
 
-				def forward(self, x):
-					out, _ = self.lstm(x)
-					out = out[:, -1, :]
-					return self.fc(out)
+				class LSTMModel(nn.Module):
+					def __init__(self, input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, output_size=2):
+						super().__init__()
+						self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+						self.fc = nn.Linear(hidden_size, output_size)
 
-			model = LSTMModel()
-			model.load_state_dict(torch.load(path))
-			self.model = model
+					def forward(self, x):
+						out, _ = self.lstm(x)
+						out = out[:, -1, :]
+						return self.fc(out)
 
-		elif model_type == "tensorflow_gru":
-			self.model = keras.models.load_model(path)
+				model = LSTMModel()
+				model.load_state_dict(torch.load(path))
+				self.model = model
+				logger.info(f"Модель PyTorch LSTM загружена: {path}")
 
-		else:
-			raise ValueError("Неизвестный тип модели")
+			elif model_type == "tensorflow_gru":
+				self.model = keras.models.load_model(path)
+				logger.info(f"Модель TensorFlow GRU загружена: {path}")
 
-		# Логирование загрузки
-		log_model_load(model_type, path, settings.MODEL_PARAMS)
+			else:
+				raise ValueError(f"Неизвестный тип модели: {model_type}")
+
+			# Логирование загрузки
+			log_model_load(model_type, path, settings.MODEL_PARAMS)
+
+		except Exception as e:
+			logger.error(f"Ошибка загрузки модели ({model_type}) из {path}: {e}",
+							extra={"operation": "load_model", "path": path})
+			raise
 
 
 	async def load_model_from_db(self, name: str):
 		"""Загрузить ML модель по имени из таблицы ml_models."""
-		async with get_session() as session:
-			ml_model = await crud.get_ml_model_by_name(session, name)
-			if not ml_model:
-				raise ValueError(f"Модель '{name}' не найдена в БД")
+		if not name or not isinstance(name, str):
+			raise ValueError("Некорректное имя модели для загрузки из БД")
 
-			# читаем параметры
-			model_type = ml_model.type
-			path = ml_model.path
-			params = ml_model.params or {}
+		try:
+			async with get_session() as session:
+				ml_model = await crud.get_ml_model_by_name(session, name)
+				if not ml_model:
+					raise ValueError(f"Модель '{name}' не найдена в БД")
 
-			# загружаем модель (без внутреннего логирования)
-			self.load_model(path=path, model_type=model_type)
+				# читаем параметры
+				model_type = ml_model.type
+				path = ml_model.path
+				params = ml_model.params or {}
 
-			# Логирование загрузки из БД — только один раз
-			log_model_load(model_type, path, params)
+				# загружаем модель
+				self.load_model(path=path, model_type=model_type)
 
-			return ml_model
+				# Логирование загрузки из БД — только один раз
+				log_model_load(model_type, path, params)
+				logger.info(f"Модель '{ml_model.name}' загружена из БД: type={model_type}, path={path}")
+
+				return ml_model
+
+		except Exception as e:
+			logger.error(f"Ошибка загрузки модели '{name}' из БД: {e}",
+							extra={"operation": "load_model_from_db", "model_name": name})
+			raise
 
 
 	# --- СОХРАНЕНИЕ ЭМБЕДДИНГА СИГНАЛА ---
 	def save_signal_embedding(self, features: dict, signal_id: int):
+		if not isinstance(features, dict) or not isinstance(signal_id, int):
+			logger.error(f"Некорректные входные данные: features={features}, signal_id={signal_id}")
+			return {"status": "skipped", "reason": "invalid input"}
+
 		try:
 			self.vector_db.use_collection("signals")
 			values = [float(v) for v in features.values()]
 
+			# Проверка на валидность признаков
 			if len(values) < 3 or np.allclose(values, 0):
-				logger.info(f"Сигнал {signal_id} некорректный")
+				logger.info(f"Сигнал {signal_id} некорректный (мало признаков или все нули)")
 				return {"status": "skipped", "reason": "invalid features"}
 
 			if np.var(values) < 1e-6:
 				logger.info(f"Сигнал {signal_id} имеет слишком низкую дисперсию")
 				return {"status": "skipped", "reason": "low variance"}
 
+			# Формируем вектор фиксированного размера
 			vector = (values * (self.vector_size // len(values) + 1))[:self.vector_size]
 			payload = {"id": signal_id, "features": features}
 
+			# Проверка на дубликаты
 			existing = self.vector_db.search_with_filter(vector, {"id": signal_id}, top_k=1)
 			if existing and not isinstance(existing, dict) and len(existing) > 0:
 				logger.info(f"Сигнал {signal_id} уже существует в Qdrant")
 				return {"status": "skipped", "reason": "duplicate"}
 
+			# Проверка payload
 			if "id" not in payload or "features" not in payload:
 				logger.error(f"Payload некорректный: {payload}")
 				return {"status": "skipped", "reason": "invalid payload"}
 
+			# Сохраняем эмбеддинг
 			self.vector_db.insert_vector(vector, payload)
 			logger.info(f"Эмбеддинг сигнала сохранён: {payload}",
 						extra={"operation": "insert", "collection": "signals"})
 			return {"status": "ok", "id": signal_id}
+
 		except Exception as e:
 			logger.error(f"Ошибка сохранения эмбеддинга сигнала: {e}",
 							extra={"operation": "insert", "collection": "signals"})
 			return {"error": str(e)}
-

@@ -2,14 +2,18 @@
 from typing import List, Dict, Union, Optional
 import math
 import asyncio
-from prometheus_client import Gauge, Counter, Histogram
 import numpy as np
+from prometheus_client import Gauge, Counter, Histogram
 from app.utils.logger import logger, metrics_logger
 
 # --- Trading Metrics ---
 def _extract_profit(trade: Union[Dict, object]) -> float:
 	"""Универсальный доступ к профиту (dict или ORM)."""
-	return trade["profit"] if isinstance(trade, dict) else getattr(trade, "profit", 0.0)
+	try:
+		return trade["profit"] if isinstance(trade, dict) else getattr(trade, "profit", 0.0)
+	except Exception as e:
+		logger.error(f"Ошибка извлечения профита: {e}", extra={"operation": "metrics", "collection": "trading"})
+		return 0.0
 
 def calculate_profit(trades: List[Union[Dict, object]]) -> float:
 	return sum(_extract_profit(trade) for trade in trades)
@@ -39,26 +43,38 @@ def calculate_max_drawdown(trades: List[Union[Dict, object]]) -> float:
 def calculate_sharpe_ratio(trades: List[Union[Dict, object]]) -> float:
 	if not trades:
 		return 0.0
-	profits = [_extract_profit(t) for t in trades]
-	avg = sum(profits) / len(profits)
-	std = math.sqrt(sum((p - avg) ** 2 for p in profits) / len(profits))
-	return avg / std if std > 0 else 0.0
+	try:
+		profits = np.array([_extract_profit(t) for t in trades])
+		avg = np.mean(profits)
+		std = np.std(profits)
+		return avg / std if std > 0 else 0.0
+	except Exception as e:
+		logger.error(f"Ошибка расчёта Sharpe: {e}", extra={"operation": "metrics", "collection": "trading"})
+		return 0.0
 
 def calculate_sortino_ratio(trades: List[Union[Dict, object]]) -> float:
 	if not trades:
 		return 0.0
-	profits = [_extract_profit(t) for t in trades]
-	avg = sum(profits) / len(profits)
-	downside = [p for p in profits if p < 0]
-	if not downside:
-		return float("inf")
-	std_down = math.sqrt(sum(p ** 2 for p in downside) / len(downside))
-	return avg / std_down if std_down > 0 else 0.0
+	try:
+		profits = np.array([_extract_profit(t) for t in trades])
+		avg = np.mean(profits)
+		downside = profits[profits < 0]
+		if len(downside) == 0:
+			return float("inf")
+		std_down = np.std(downside)
+		return avg / std_down if std_down > 0 else 0.0
+	except Exception as e:
+		logger.error(f"Ошибка расчёта Sortino: {e}", extra={"operation": "metrics", "collection": "trading"})
+		return 0.0
 
 def calculate_profit_factor(trades: List[Union[Dict, object]]) -> float:
-	gains = sum(_extract_profit(t) for t in trades if _extract_profit(t) > 0)
-	losses = abs(sum(_extract_profit(t) for t in trades if _extract_profit(t) < 0))
-	return gains / losses if losses > 0 else float("inf")
+	try:
+		gains = sum(_extract_profit(t) for t in trades if _extract_profit(t) > 0)
+		losses = abs(sum(_extract_profit(t) for t in trades if _extract_profit(t) < 0))
+		return gains / losses if losses > 0 else float("inf")
+	except Exception as e:
+		logger.error(f"Ошибка расчёта Profit Factor: {e}", extra={"operation": "metrics", "collection": "trading"})
+		return 0.0
 
 def calculate_max_consecutive(trades: List[Union[Dict, object]]) -> Dict[str, int]:
 	max_wins = max_losses = 0
@@ -75,6 +91,9 @@ def calculate_max_consecutive(trades: List[Union[Dict, object]]) -> Dict[str, in
 	return {"max_consecutive_wins": max_wins, "max_consecutive_losses": max_losses}
 
 def calculate_metrics(trades: List[Union[Dict, object]]) -> Dict:
+	cancelled = sum(1 for t in trades if getattr(t, "status", None) == "cancelled" or
+					(isinstance(t, dict) and t.get("status") == "cancelled"))
+
 	return {
 		"total_profit": calculate_profit(trades),
 		"winrate": calculate_winrate(trades),
@@ -84,23 +103,21 @@ def calculate_metrics(trades: List[Union[Dict, object]]) -> Dict:
 		"sortino_ratio": calculate_sortino_ratio(trades),
 		"profit_factor": calculate_profit_factor(trades),
 		**calculate_max_consecutive(trades),
-		"trades_count": len(trades)
+		"trades_count": len(trades),
+		"cancelled_trades": cancelled
 	}
 
 # --- Метрики по пользователям и стратегиям ---
 def calculate_metrics_by_user(trades: List[Union[Dict, object]], user_id: str) -> Dict:
-	"""Метрики в разрезе пользователя."""
 	user_trades = [t for t in trades if getattr(t, "user_id", None) == user_id or (isinstance(t, dict) and t.get("user_id") == user_id)]
 	return calculate_metrics(user_trades)
 
 def calculate_metrics_by_strategy(trades: List[Union[Dict, object]], strategy: str) -> Dict:
-	"""Метрики в разрезе стратегии."""
 	strategy_trades = [t for t in trades if getattr(t, "strategy", None) == strategy or (isinstance(t, dict) and t.get("strategy") == strategy)]
 	return calculate_metrics(strategy_trades)
 
 # --- Асинхронный расчёт ---
 async def calculate_metrics_async(trades: List[Union[Dict, object]]) -> Dict:
-	"""Асинхронный расчёт метрик."""
 	loop = asyncio.get_event_loop()
 	return await loop.run_in_executor(None, lambda: calculate_metrics(trades))
 
@@ -110,37 +127,32 @@ ml_loss = Gauge("ml_training_loss", "Loss of ML training")
 ml_precision = Gauge("ml_training_precision", "Precision of ML training")
 ml_recall = Gauge("ml_training_recall", "Recall of ML training")
 
-# --- API методы для доступа к ML метрикам ---
 def get_accuracy() -> float:
 	try:
 		return ml_accuracy._value.get() or 0.0
 	except Exception as e:
-		metrics_logger.error(f"❌ Ошибка получения accuracy: {e}",
-								extra={"metric": "accuracy", "value": None, "symbol": None})
+		metrics_logger.error(f"Ошибка получения accuracy: {e}", extra={"metric": "accuracy", "value": None, "symbol": None})
 		return 0.0
 
 def get_loss() -> float:
 	try:
 		return ml_loss._value.get() or 0.0
 	except Exception as e:
-		metrics_logger.error(f"❌ Ошибка получения loss: {e}",
-								extra={"metric": "loss", "value": None, "symbol": None})
+		metrics_logger.error(f"Ошибка получения loss: {e}", extra={"metric": "loss", "value": None, "symbol": None})
 		return 0.0
 
 def get_precision() -> float:
 	try:
 		return ml_precision._value.get() or 0.0
 	except Exception as e:
-		metrics_logger.error(f"❌ Ошибка получения precision: {e}",
-								extra={"metric": "precision", "value": None, "symbol": None})
+		metrics_logger.error(f"Ошибка получения precision: {e}", extra={"metric": "precision", "value": None, "symbol": None})
 		return 0.0
 
 def get_recall() -> float:
 	try:
 		return ml_recall._value.get() or 0.0
 	except Exception as e:
-		metrics_logger.error(f"❌ Ошибка получения recall: {e}",
-								extra={"metric": "recall", "value": None, "symbol": None})
+		metrics_logger.error(f"Ошибка получения recall: {e}", extra={"metric": "recall", "value": None, "symbol": None})
 		return 0.0
 
 # --- Agent Metrics (Prometheus) ---
@@ -152,22 +164,31 @@ AGENT_LATENCY = Histogram("agent_latency_seconds", "Время ответа аг
 REPORT_SEARCH_ACCURACY = Gauge("report_search_accuracy", "Точность поиска документов для отчётов (% релевантных)")
 REPORT_LATENCY_HISTOGRAM = Histogram("report_latency_seconds", "Распределение времени ответа отчётов")
 
+# 🔹 Добавляем недостающие метрики для ReportsWorker
+REPORT_REQUESTS_TOTAL = Counter("report_requests_total", "Количество запросов на генерацию отчётов")
+REPORT_AVG_RESPONSE_TIME = Gauge("report_avg_response_time_seconds", "Среднее время ответа отчётов")
+
 def export_report_metrics(search_accuracy: float, latency: float):
 	try:
 		REPORT_SEARCH_ACCURACY.set(search_accuracy)
 		REPORT_LATENCY_HISTOGRAM.observe(latency)
-		metrics_logger.info(f"✅ Экспорт метрик отчётов: accuracy={search_accuracy}, latency={latency}",
-							extra={"metric": "report_search_accuracy", "value": search_accuracy, "symbol": None})
+		metrics_logger.info(
+			f"Экспорт метрик отчётов: accuracy={search_accuracy}, latency={latency}",
+			extra={"metric": "report_search_accuracy", "value": search_accuracy, "symbol": None}
+		)
 	except Exception as e:
-		metrics_logger.error(f"❌ Ошибка экспорта метрик отчётов: {e}",
-								extra={"metric": "report_search_accuracy", "value": None, "symbol": None})
+		metrics_logger.error(
+			f"Ошибка экспорта метрик отчётов: {e}",
+			extra={"metric": "report_search_accuracy", "value": None, "symbol": None}
+		)
 
 # --- ML Training Extended Metrics ---
 ml_epoch_loss = Histogram("ml_training_epoch_loss", "Loss per epoch during ML training")
 ml_training_time = Gauge("ml_training_time_seconds", "Total training time in seconds")
 ml_learning_rate = Gauge("ml_training_learning_rate", "Learning rate used in training")
 
-def export_ml_metrics(metrics: Dict[str, float], epoch_losses: Optional[List[float]] = None, training_time: Optional[float] = None, learning_rate: Optional[float] = None):
+def export_ml_metrics(metrics: Dict[str, float], epoch_losses: Optional[List[float]] = None,
+						training_time: Optional[float] = None, learning_rate: Optional[float] = None):
 	try:
 		if "accuracy" in metrics and metrics["accuracy"] is not None:
 			ml_accuracy.set(metrics["accuracy"])
@@ -185,11 +206,16 @@ def export_ml_metrics(metrics: Dict[str, float], epoch_losses: Optional[List[flo
 			ml_training_time.set(training_time)
 		if learning_rate is not None:
 			ml_learning_rate.set(learning_rate)
-		metrics_logger.info(f"✅ Экспорт ML метрик: {metrics}, training_time={training_time}, lr={learning_rate}",
-							extra={"metric": "ml_training", "value": metrics.get("accuracy"), "symbol": None})
+
+		metrics_logger.info(
+			f"Экспорт ML метрик: {metrics}, training_time={training_time}, lr={learning_rate}",
+			extra={"metric": "ml_training", "value": metrics.get("accuracy"), "symbol": None}
+		)
 	except Exception as e:
-		metrics_logger.error(f"❌ Ошибка экспорта ML метрик: {e}",
-								extra={"metric": "ml_training", "value": None, "symbol": None})
+		metrics_logger.error(
+			f"Ошибка экспорта ML метрик: {e}",
+			extra={"metric": "ml_training", "value": None, "symbol": None}
+		)
 
 # --- ML Cross-Validation Metrics (Prometheus) ---
 ml_cv_accuracy = Gauge("ml_cv_accuracy", "Average accuracy across CV folds")
@@ -218,9 +244,7 @@ def aggregate_cv_metrics(list_of_metrics: List[Dict[str, float]]) -> Dict[str, f
 	}
 
 def export_cv_metrics(metrics: Dict[str, float]):
-	"""
-	Экспорт усреднённых метрик кросс-валидации в Prometheus.
-	"""
+	"""Экспорт усреднённых метрик кросс-валидации в Prometheus."""
 	try:
 		if "accuracy" in metrics and metrics["accuracy"] is not None:
 			ml_cv_accuracy.set(metrics["accuracy"])
@@ -230,11 +254,16 @@ def export_cv_metrics(metrics: Dict[str, float]):
 			ml_cv_recall.set(metrics["recall"])
 		if "loss" in metrics and metrics["loss"] is not None:
 			ml_cv_loss.set(metrics["loss"])
-		metrics_logger.info(f"✅ Экспорт CV метрик: {metrics}",
-							extra={"metric": "ml_cv", "value": metrics.get("accuracy"), "symbol": None})
+
+		metrics_logger.info(
+			f"Экспорт CV метрик: {metrics}",
+			extra={"metric": "ml_cv", "value": metrics.get("accuracy"), "symbol": None}
+		)
 	except Exception as e:
-		metrics_logger.error(f"❌ Ошибка экспорта CV метрик: {e}",
-								extra={"metric": "ml_cv", "value": None, "symbol": None})
+		metrics_logger.error(
+			f"Ошибка экспорта CV метрик: {e}",
+			extra={"metric": "ml_cv", "value": None, "symbol": None}
+		)
 
 # --- Auto Logging Metrics (Prometheus) ---
 ml_training_runs_total = Counter("ml_training_runs_total", "Количество запусков обучения ML моделей")
@@ -247,9 +276,7 @@ ml_errors_total = Counter("ml_errors_total", "Количество ошибок 
 
 def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[float]] = None,
 						training_time: Optional[float] = None, learning_rate: Optional[float] = None):
-	"""
-	Логирование запуска обучения модели.
-	"""
+	"""Логирование запуска обучения модели."""
 	try:
 		ml_training_runs_total.inc()
 		if "accuracy" in metrics and metrics["accuracy"] is not None:
@@ -260,12 +287,17 @@ def log_training_run(metrics: Dict[str, float], epoch_losses: Optional[List[floa
 			ml_training_time.set(training_time)
 		if learning_rate is not None:
 			ml_learning_rate.set(learning_rate)
-		metrics_logger.info(f"✅ Логирование обучения: {metrics}, training_time={training_time}, lr={learning_rate}",
-							extra={"metric": "ml_training_run", "value": metrics.get("accuracy"), "symbol": None})
+
+		metrics_logger.info(
+			f"Логирование обучения: {metrics}, training_time={training_time}, lr={learning_rate}",
+			extra={"metric": "ml_training_run", "value": metrics.get("accuracy"), "symbol": None}
+		)
 	except Exception as e:
 		ml_errors_total.inc()
-		metrics_logger.error(f"❌ Ошибка логирования обучения: {e}",
-								extra={"metric": "ml_training_run", "value": None, "symbol": None})
+		metrics_logger.error(
+			f"Ошибка логирования обучения: {e}",
+			extra={"metric": "ml_training_run", "value": None, "symbol": None}
+		)
 
 def log_prediction(features: Dict[str, float], result: Dict[str, float], confidence: float, latency: Optional[float] = None):
 	"""
@@ -280,9 +312,14 @@ def log_prediction(features: Dict[str, float], result: Dict[str, float], confide
 		ml_prediction_confidence.observe(confidence)
 		if latency is not None:
 			ml_prediction_latency.observe(latency)
-		metrics_logger.info(f"✅ Логирование предсказания: confidence={confidence}, latency={latency}, result={result}",
-							extra={"metric": "ml_prediction", "value": confidence, "symbol": None})
+
+		metrics_logger.info(
+			f"Логирование предсказания: confidence={confidence}, latency={latency}, result={result}",
+			extra={"metric": "ml_prediction", "value": confidence, "symbol": None}
+		)
 	except Exception as e:
 		ml_errors_total.inc()
-		metrics_logger.error(f"❌ Ошибка логирования предсказания: {e}",
-								extra={"metric": "ml_prediction", "value": None, "symbol": None})
+		metrics_logger.error(
+			f"Ошибка логирования предсказания: {e}",
+			extra={"metric": "ml_prediction", "value": None, "symbol": None}
+		)

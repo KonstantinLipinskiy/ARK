@@ -36,13 +36,8 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 		)
 		users = await db.scalar(select(func.count()).select_from(UserORM))
 
-		wins = await db.scalar(select(func.count()).select_from(TradeORM).filter(TradeORM.profit_loss > 0))
-		avg_profit = await db.scalar(select(func.avg(TradeORM.profit_loss)))
 		active_positions = await db.scalar(
 			select(func.count()).select_from(TradeORM).filter(TradeORM.status == TradeStatus.open)
-		)
-		cancelled_trades = await db.scalar(
-			select(func.count()).select_from(TradeORM).filter(TradeORM.status == TradeStatus.cancelled)
 		)
 
 		result = await db.execute(select(TradeORM))
@@ -53,10 +48,10 @@ async def get_stats(db: AsyncSession = Depends(get_db), current_admin: UserORM =
 			"total_trades": total_trades,
 			"active_signals": active_signals,
 			"users": users,
-			"winrate": round((wins / total_trades) * 100, 2) if total_trades else 0,
-			"avg_profit": avg_profit or 0,
+			"winrate": round(metrics.get("winrate", 0.0) * 100, 2),
+			"avg_profit": metrics.get("average_profit", 0.0),
 			"active_positions": active_positions,
-			"cancelled_trades": cancelled_trades or 0,
+			"cancelled_trades": metrics.get("cancelled_trades", 0),
 			"max_drawdown": metrics.get("max_drawdown", 0.0),
 			"sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
 			"sortino_ratio": metrics.get("sortino_ratio", 0.0),

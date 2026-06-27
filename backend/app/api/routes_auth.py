@@ -1,4 +1,4 @@
-#app/api/routers_auth.py
+# app/api/routers_auth.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -91,6 +91,11 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
 	if not payload:
 		log_risk_violation("refresh_token", "Попытка обновления с недействительным refresh токеном")
 		raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+	# 🔹 Проверка типа токена
+	if payload.get("token_type") != "refresh":
+		log_risk_violation("refresh_token", "Попытка обновления с access токеном вместо refresh")
+		raise HTTPException(status_code=401, detail="Invalid token type")
 
 	db_token = await crud.get_refresh_token(db, refresh_token)
 	if not db_token or db_token.expires_at < datetime.utcnow():

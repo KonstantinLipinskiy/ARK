@@ -1,29 +1,38 @@
 # app/utils/security.py
+import os
 import jwt
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from passlib.context import CryptContext
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from app.config import settings
 from app.utils.logger import logger
+from app.db.session import get_db
+from app.db.schemas import UserORM
+from app.models.user import UserOut
 
 # 🔹 Настройка bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
-# 🔹 Хэширование пароля
-def hash_password(password: str) -> str:
+# 🔹 Хэширование пароля с солью
+def hash_password(password: str) -> tuple[str, str]:
 	"""
-	Хэширование пароля с использованием bcrypt.
+	Возвращает (salt, password_hash).
+	salt генерируется случайно, password_hash считается как bcrypt-хэш от password+salt.
 	"""
-	return pwd_context.hash(password)
+	salt = os.urandom(16).hex()
+	password_hash = pwd_context.hash(password + salt)
+	return salt, password_hash
 
 # 🔹 Проверка пароля
-def verify_password(password: str, hashed_password: str) -> bool:
+def verify_password(password: str, salt: str, hashed_password: str) -> bool:
 	"""
-	Проверяет введённый пароль против сохранённого хэша.
+	Проверяет введённый пароль против сохранённого хэша с солью.
 	"""
-	return pwd_context.verify(password, hashed_password)
+	return pwd_context.verify(password + salt, hashed_password)
 
 # 🔹 Создание JWT access токена
 def create_access_token(data: dict, expires_minutes: int = settings.JWT_EXPIRE_MINUTES) -> str:
@@ -61,7 +70,12 @@ def decode_jwt_token(token: str) -> dict | None:
 		return None
 
 # 🔹 Получение текущего пользователя
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+
+
+async def get_current_user(
+	credentials: HTTPAuthorizationCredentials = Depends(security),
+	db: AsyncSession = Depends(get_db)
+	) -> UserOut:
 	token = credentials.credentials
 	payload = decode_jwt_token(token)
 	if not payload:
@@ -77,10 +91,19 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 						extra={"operation": "security", "collection": "auth"})
 		raise HTTPException(status_code=401, detail="Unauthorized")
 
-	return {"user_id": user_id, "role": role}
+	result = await db.execute(select(UserORM).filter(UserORM.id == user_id))
+	user = result.scalars().first()
+	if not user:
+		raise HTTPException(status_code=404, detail="User not found")
+
+	return UserOut.model_validate(user)
+
 
 # 🔹 Получение текущего администратора
-async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_current_admin(
+	credentials: HTTPAuthorizationCredentials = Depends(security),
+	db: AsyncSession = Depends(get_db)
+	) -> UserORM:
 	token = credentials.credentials
 	payload = decode_jwt_token(token)
 	if not payload:
@@ -101,6 +124,11 @@ async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(
 						extra={"operation": "security", "collection": "auth"})
 		raise HTTPException(status_code=403, detail="Admin privileges required")
 
+	result = await db.execute(select(UserORM).filter(UserORM.id == user_id))
+	user = result.scalars().first()
+	if not user:
+		raise HTTPException(status_code=404, detail="User not found")
+
 	logger.info(f"✅ Admin {user_id} успешно получил доступ",
 				extra={"operation": "security", "collection": "auth"})
-	return {"user_id": user_id, "role": role}
+	return user

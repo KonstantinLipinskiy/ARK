@@ -4,18 +4,13 @@ from typing import List, Dict, Optional
 from langchain_community.chains import RetrievalQA
 from langchain_openai import OpenAI
 from app.db.vector import VectorDB
-from app.utils.metrics import calculate_metrics
+from app.utils.metrics import calculate_metrics, REPORT_REQUESTS_TOTAL, REPORT_AVG_RESPONSE_TIME
 from app.services.ml import MLService
 from app.utils.logger import logger
-from prometheus_client import Counter, Gauge
 import pandas as pd
 from fpdf import FPDF
 from jinja2 import Template
 import json
-
-# 🔹 Метрики Prometheus
-REPORT_REQUESTS_TOTAL = Counter("report_requests_total", "Total RAG report requests")
-REPORT_AVG_RESPONSE_TIME = Gauge("report_avg_response_time", "Average response time for RAG reports")
 
 class ReportsService:
 	def __init__(self, collection_name: str = "trades"):
@@ -57,7 +52,6 @@ class ReportsService:
 				extra={"operation": "reports_service", "collection": "reports"}
 			)
 			return f"❌ Ошибка генерации отчёта: {e}"
-
 
 	def _generate_rag_report(
 		self,
@@ -258,7 +252,6 @@ class ReportsService:
 				f"Ошибка экспорта HTML: {e}",
 				extra={"operation": "reports_service", "collection": "html"}
 			)
-
 
 	def add_document(self, vector: list[float], payload: dict):
 		self.vector_db.insert_vector(vector, payload)
